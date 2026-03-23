@@ -1,4 +1,4 @@
-
+// ─── Load .env FIRST — before all other imports ───────────────────────────────
 import './config/env.js';
 
 import express from 'express';
@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-
+// ─── Security ─────────────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
@@ -26,9 +26,11 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+// ─── Body parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
+// ─── Rate limiting ────────────────────────────────────────────────────────────
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 200,
   standardHeaders: true, legacyHeaders: false,
@@ -41,6 +43,7 @@ const authLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
+// ─── Request logger ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -49,23 +52,45 @@ app.use((req, res, next) => {
   next();
 });
 
+// ─── Health / root ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => res.json({ name: "UteriFlow API", version: '1.0.0', documentation: '/api-docs', health: '/health' }));
 app.get('/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString(), env: NODE_ENV }));
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'UteriFlow API Docs',
-  swaggerOptions: { persistAuthorization: true },
-}));
+// ─── Swagger docs ─────────────────────────────────────────────────────────────
+// swagger-ui-express static assets break on Vercel serverless
+// Serve raw JSON spec + redirect to swagger.io online viewer
 
+app.get('/api-docs/spec.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json(swaggerSpec);
+});
+
+app.get('/api-docs', (req, res) => {
+  const specUrl = `${req.protocol}://${req.get('host')}/api-docs/spec.json`;
+  res.redirect(`https://petstore.swagger.io/?url=${encodeURIComponent(specUrl)}`);
+});
+
+// Full Swagger UI only on local dev
+if (!process.env.VERCEL) {
+  app.use('/api-docs/ui', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'UteriFlow API Docs',
+    swaggerOptions: { persistAuthorization: true },
+  }));
+}
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/api/v1/period', periodRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/admin', communityRoutes);
 
+// ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} not found`, code: 'NOT_FOUND' }));
 
+// ─── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({ error: err.message, ...(err.code && { code: err.code }) });
@@ -82,13 +107,15 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ─── Start ────────────────────────────────────────────────────────────────────
+// On Vercel (serverless) skip app.listen — just export the app
 if (!process.env.VERCEL) {
   app.listen(PORT, async () => {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error('\n WARNING: SUPABASE_SERVICE_ROLE_KEY is not set in .env');
+      console.error('\n⚠️  WARNING: SUPABASE_SERVICE_ROLE_KEY is not set in .env');
       console.error('   All /admin/* routes will return 503 until this is added.\n');
     } else {
-      console.log('[Supabase] Service role key loaded — admin routes active');
+      console.log('[Supabase] ✅ Service role key loaded — admin routes active');
     }
     console.log(`\nUteriFlow API running — port ${PORT} [${NODE_ENV}]`);
     console.log(`Swagger docs: http://localhost:${PORT}/api-docs`);
@@ -110,13 +137,13 @@ if (!process.env.VERCEL) {
           connectionTimeout: 8000,
         });
         await transporter.verify();
-        console.log(`[SMTP]  Connected to ${smtpHost} — emails will be sent via Resend\n`);
+        console.log(`[SMTP] ✅ Connected to ${smtpHost} — emails will be sent via Resend\n`);
       } catch (err) {
-        console.error(`[SMTP]  Connection FAILED: ${err.message}`);
+        console.error(`[SMTP] ❌ Connection FAILED: ${err.message}`);
         console.error(`[SMTP]    Emails will fall back to console output until resolved.\n`);
       }
     } else {
-      console.warn('[SMTP]  No SMTP config — emails will print to console only.\n');
+      console.warn('[SMTP] ⚠️  No SMTP config — emails will print to console only.\n');
     }
   });
 }
