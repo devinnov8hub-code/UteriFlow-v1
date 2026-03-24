@@ -84,41 +84,43 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error('\n⚠️  WARNING: SUPABASE_SERVICE_ROLE_KEY is not set — admin routes will fail\n');
-  } else {
-    console.log('[Supabase] ✅ Service role key loaded — admin routes active');
-  }
-
-  console.log(`\nUteriFlow API running — port ${PORT} [${NODE_ENV}]`);
-  console.log(`Swagger docs: http://localhost:${PORT}/api-docs`);
-  console.log(`Health:       http://localhost:${PORT}/health\n`);
-
-  const smtpHost = (process.env.SMTP_HOST || '').trim();
-  const smtpUser = (process.env.SMTP_USER || '').trim();
-  const smtpPass = (process.env.SMTP_PASS || '').trim();
-
-  if (smtpHost && smtpUser && smtpPass) {
-    try {
-      const nodemailer = await import('nodemailer');
-      const transporter = nodemailer.default.createTransport({
-        host: smtpHost,
-        port: parseInt((process.env.SMTP_PORT || '587').trim()),
-        secure: false,
-        auth: { user: smtpUser, pass: smtpPass },
-        tls: { rejectUnauthorized: false },
-        connectionTimeout: 8000,
-      });
-      await transporter.verify();
-      console.log(`[SMTP] ✅ Connected to ${smtpHost} — emails will be sent via Resend\n`);
-    } catch (err) {
-      console.error(`[SMTP] ❌ Connection FAILED: ${err.message}\n`);
+// ─── Start (local dev only — Vercel uses export default) ──────────────────────
+const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
+if (!isVercel) {
+  app.listen(PORT, async () => {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('\n⚠️  WARNING: SUPABASE_SERVICE_ROLE_KEY is not set — admin routes will fail\n');
+    } else {
+      console.log('[Supabase] ✅ Service role key loaded — admin routes active');
     }
-  } else {
-    console.warn('[SMTP] ⚠️  No SMTP config — emails will print to console only.\n');
-  }
-});
+    console.log(`\nUteriFlow API running — port ${PORT} [${NODE_ENV}]`);
+    console.log(`Swagger docs: http://localhost:${PORT}/api-docs`);
+    console.log(`Health:       http://localhost:${PORT}/health\n`);
+
+    const smtpHost = (process.env.SMTP_HOST || '').trim();
+    const smtpUser = (process.env.SMTP_USER || '').trim();
+    const smtpPass = (process.env.SMTP_PASS || '').trim();
+
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        const nodemailer = await import('nodemailer');
+        const transporter = nodemailer.default.createTransport({
+          host: smtpHost,
+          port: parseInt((process.env.SMTP_PORT || '587').trim()),
+          secure: false,
+          auth: { user: smtpUser, pass: smtpPass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 8000,
+        });
+        await transporter.verify();
+        console.log(`[SMTP] ✅ Connected to ${smtpHost} — emails will be sent via Resend\n`);
+      } catch (err) {
+        console.error(`[SMTP] ❌ Connection FAILED: ${err.message}\n`);
+      }
+    } else {
+      console.warn('[SMTP] ⚠️  No SMTP config — emails will print to console only.\n');
+    }
+  });
+}
 
 export default app;
