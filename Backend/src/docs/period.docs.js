@@ -1,6 +1,6 @@
 /**
  * @swagger
- * /period/first-log:
+ * /api/v1/period/first-log:
  *   post:
  *     summary: Log the user's first period cycle
  *     description: >
@@ -52,7 +52,7 @@
 
 /**
  * @swagger
- * /period/log:
+ * /api/v1/period/log:
  *   post:
  *     summary: Log a period cycle
  *     description: Records a new period cycle with optional end date and notes. Requires authentication.
@@ -106,7 +106,7 @@
 
 /**
  * @swagger
- * /period/logs:
+ * /api/v1/period/logs:
  *   get:
  *     summary: Get all period logs for the authenticated user
  *     description: Returns a paginated list of all period logs ordered by start date descending.
@@ -157,7 +157,7 @@
 
 /**
  * @swagger
- * /period/log/{id}:
+ * /api/v1/period/log/{id}:
  *   put:
  *     summary: Update a period log
  *     description: Updates any field of an existing period log. Only the owner can update their logs.
@@ -221,7 +221,7 @@
 
 /**
  * @swagger
- * /period/log/{id}:
+ * /api/v1/period/log/{id}:
  *   delete:
  *     summary: Delete a period log
  *     description: Permanently deletes a period log. Only the owner can delete their logs.

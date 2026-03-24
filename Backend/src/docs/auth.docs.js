@@ -1,6 +1,6 @@
 /**
  * @swagger
- * /auth/email/check:
+ * /api/v1/auth/email/check:
  *   post:
  *     summary: Check if an email is registered
  *     description: Returns whether the email exists and which flow to follow — login or register.
@@ -36,7 +36,7 @@
 
 /**
  * @swagger
- * /auth/email/send-otp:
+ * /api/v1/auth/email/send-otp:
  *   post:
  *     summary: Send OTP to email
  *     description: >
@@ -76,7 +76,7 @@
 
 /**
  * @swagger
- * /auth/email/verify:
+ * /api/v1/auth/email/verify:
  *   post:
  *     summary: Verify the OTP code
  *     description: >
@@ -120,7 +120,7 @@
 
 /**
  * @swagger
- * /auth/email/resend:
+ * /api/v1/auth/email/resend:
  *   post:
  *     summary: Resend OTP verification code
  *     description: Invalidates previous unverified OTPs and sends a fresh 6-digit code.
@@ -158,7 +158,7 @@
 
 /**
  * @swagger
- * /auth/password/create:
+ * /api/v1/auth/password/create:
  *   post:
  *     summary: Create account with password
  *     description: >
@@ -203,7 +203,7 @@
 
 /**
  * @swagger
- * /auth/login:
+ * /api/v1/auth/login:
  *   post:
  *     summary: Log in with email and password
  *     description: Authenticates a registered user and returns a JWT access and refresh token pair.
@@ -243,7 +243,7 @@
 
 /**
  * @swagger
- * /auth/token/refresh:
+ * /api/v1/auth/token/refresh:
  *   post:
  *     summary: Refresh access token
  *     description: Uses a valid refresh token to issue a new access token and refresh token pair.
@@ -277,7 +277,7 @@
 
 /**
  * @swagger
- * /auth/logout:
+ * /api/v1/auth/logout:
  *   post:
  *     summary: Log out current user
  *     description: Invalidates the current session. Pass the Bearer token in the Authorization header.
@@ -298,7 +298,7 @@
 
 /**
  * @swagger
- * /auth/password/forgot:
+ * /api/v1/auth/password/forgot:
  *   post:
  *     summary: "Step 1 of 3 — Send 6-digit reset code to email"
  *     description: >
@@ -335,7 +335,7 @@
 
 /**
  * @swagger
- * /auth/password/verify-code:
+ * /api/v1/auth/password/verify-code:
  *   post:
  *     summary: "Step 2 of 3 — Verify the 6-digit reset code"
  *     description: >
@@ -386,7 +386,7 @@
 
 /**
  * @swagger
- * /auth/password/reset:
+ * /api/v1/auth/password/reset:
  *   post:
  *     summary: "Step 3 of 3 — Set new password"
  *     description: >

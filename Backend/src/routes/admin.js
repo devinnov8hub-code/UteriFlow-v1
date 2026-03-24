@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/admin.js';
 import { validate } from '../middleware/validate.js';
 import { body, param, query } from 'express-validator';
 import { AppError, NotFoundError } from '../errors/index.js';
+import { success } from '../utils/response.js';
 
 const router = express.Router();
 
@@ -64,7 +65,7 @@ router.get('/stats', async (req, res, next) => {
       return acc;
     }, {});
 
-    return res.json({
+    return success(res, {
       overview: {
         totalUsers,
         onboardedUsers,
@@ -115,7 +116,7 @@ router.get(
       const { data, count, error } = await query;
       if (error) throw error;
 
-      return res.json({
+      return success(res, {
         users: data,
         pagination: { total: count, limit, offset, returned: data.length },
       });
@@ -147,7 +148,7 @@ router.get('/users/:id', uuidParam, validate, async (req, res, next) => {
 
     if (countError) throw countError;
 
-    return res.json({ user: { ...profile, periodLogCount: periodCount } });
+    return success(res, { user: { ...profile, periodLogCount: periodCount } });
   } catch (error) {
     next(error);
   }
@@ -201,7 +202,7 @@ router.patch(
       if (error) throw error;
       if (!data) throw new NotFoundError('User not found');
 
-      return res.json({ message: 'User profile updated successfully', user: data });
+      return success(res, { message: 'User profile updated successfully', user: data });
     } catch (error) {
       next(error);
     }
@@ -225,7 +226,7 @@ router.delete('/users/:id', uuidParam, validate, async (req, res, next) => {
     const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(id);
     if (deleteError) throw deleteError;
 
-    return res.json({
+    return success(res, {
       message: 'User deleted successfully',
       deleted: { id: profile.id, email: profile.email },
     });
@@ -260,7 +261,7 @@ router.get(
       const { data, count, error } = await q;
       if (error) throw error;
 
-      return res.json({
+      return success(res, {
         periodLogs: data,
         pagination: { total: count, limit, offset, returned: data.length },
       });
@@ -285,7 +286,7 @@ router.delete('/period-logs/:id', uuidParam, validate, async (req, res, next) =>
     if (error) throw error;
     if (!data) throw new NotFoundError('Period log not found');
 
-    return res.json({ message: 'Period log deleted successfully', deleted: { id: data.id } });
+    return success(res, { message: 'Period log deleted successfully', deleted: { id: data.id } });
   } catch (error) {
     next(error);
   }
@@ -302,7 +303,7 @@ router.post('/users/:id/grant-admin', uuidParam, validate, async (req, res, next
     if (error) throw error;
     if (!data?.user) throw new NotFoundError('User not found');
 
-    return res.json({ message: 'Admin privileges granted', userId: id });
+    return success(res, { message: 'Admin privileges granted', userId: id });
   } catch (error) {
     next(error);
   }
@@ -319,7 +320,7 @@ router.post('/users/:id/revoke-admin', uuidParam, validate, async (req, res, nex
     if (error) throw error;
     if (!data?.user) throw new NotFoundError('User not found');
 
-    return res.json({ message: 'Admin privileges revoked', userId: id });
+    return success(res, { message: 'Admin privileges revoked', userId: id });
   } catch (error) {
     next(error);
   }

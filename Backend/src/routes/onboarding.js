@@ -4,6 +4,7 @@ import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { onboardingValidators } from '../validators/index.js';
 import { NotFoundError } from '../errors/index.js';
+import { success } from '../utils/response.js';
 import { sendOnboardingCompleteEmail } from '../utils/email.js';
 
 const router = express.Router();
@@ -19,7 +20,7 @@ router.post('/name', onboardingValidators.name, validate, async (req, res, next)
   try {
     const { displayName } = req.body;
     await updateProfile(req.user.id, { display_name: displayName });
-    return res.json({ message: 'Display name updated successfully', displayName });
+    return success(res, { message: 'Display name updated successfully', displayName });
   } catch (error) { next(error); }
 });
 
@@ -27,7 +28,7 @@ router.post('/age', onboardingValidators.age, validate, async (req, res, next) =
   try {
     const { ageGroup } = req.body;
     await updateProfile(req.user.id, { age_group: ageGroup });
-    return res.json({ message: 'Age group updated successfully', ageGroup });
+    return success(res, { message: 'Age group updated successfully', ageGroup });
   } catch (error) { next(error); }
 });
 
@@ -35,7 +36,7 @@ router.post('/hormonal-status', onboardingValidators.hormonalStatus, validate, a
   try {
     const { hormonalStatus } = req.body;
     await updateProfile(req.user.id, { hormonal_status: hormonalStatus });
-    return res.json({ message: 'Hormonal status updated successfully', hormonalStatus });
+    return success(res, { message: 'Hormonal status updated successfully', hormonalStatus });
   } catch (error) { next(error); }
 });
 
@@ -43,7 +44,7 @@ router.post('/period-regularity', onboardingValidators.periodRegularity, validat
   try {
     const { periodRegularity } = req.body;
     await updateProfile(req.user.id, { period_regularity: periodRegularity });
-    return res.json({ message: 'Period regularity updated successfully', periodRegularity });
+    return success(res, { message: 'Period regularity updated successfully', periodRegularity });
   } catch (error) { next(error); }
 });
 
@@ -51,7 +52,7 @@ router.post('/health-focus', onboardingValidators.healthFocus, validate, async (
   try {
     const { healthFocus } = req.body;
     await updateProfile(req.user.id, { health_focus: healthFocus });
-    return res.json({ message: 'Health focus areas updated successfully', healthFocus });
+    return success(res, { message: 'Health focus areas updated successfully', healthFocus });
   } catch (error) { next(error); }
 });
 
@@ -73,7 +74,7 @@ router.post('/complete', async (req, res, next) => {
         .catch((e) => console.error('[Email] Onboarding complete email failed:', e.message));
     }
 
-    return res.json({ message: 'Onboarding completed successfully', onboardingCompleted: true });
+    return success(res, { message: 'Onboarding completed successfully', onboardingCompleted: true });
   } catch (error) { next(error); }
 });
 
@@ -82,7 +83,7 @@ router.get('/profile', async (req, res, next) => {
     const { data, error } = await supabase.from('user_profiles').select('*').eq('id', req.user.id).maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Profile not found');
-    return res.json({ profile: data });
+    return success(res, { profile: data });
   } catch (error) { next(error); }
 });
 

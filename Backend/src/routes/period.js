@@ -4,6 +4,7 @@ import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { periodValidators } from '../validators/index.js';
 import { NotFoundError, ConflictError } from '../errors/index.js';
+import { success } from '../utils/response.js';
 
 const router = express.Router();
 
@@ -35,7 +36,7 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
 
     if (error) throw error;
 
-    return res.status(201).json({ message: 'First period logged successfully', periodLog: data });
+    return success(res, { message: 'First period logged successfully', periodLog: data }, 201);
   } catch (error) {
     next(error);
   }
@@ -60,7 +61,7 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
 
     if (error) throw error;
 
-    return res.status(201).json({ message: 'Period logged successfully', periodLog: data });
+    return success(res, { message: 'Period logged successfully', periodLog: data }, 201);
   } catch (error) {
     next(error);
   }
@@ -81,7 +82,7 @@ router.get('/logs', periodValidators.pagination, validate, async (req, res, next
 
     if (error) throw error;
 
-    return res.json({ periodLogs: data, total: count, limit, offset });
+    return success(res, { periodLogs: data, total: count, limit, offset });
   } catch (error) {
     next(error);
   }
@@ -99,7 +100,7 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
     if (notes !== undefined) updateData.notes = notes;
 
     if (Object.keys(updateData).length === 0) {
-      return res.json({ message: 'No changes provided' });
+      return success(res, { message: 'No changes provided' });
     }
 
     const { data, error } = await supabase
@@ -114,7 +115,7 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
 
     if (!data) throw new NotFoundError('Period log not found');
 
-    return res.json({ message: 'Period log updated successfully', periodLog: data });
+    return success(res, { message: 'Period log updated successfully', periodLog: data });
   } catch (error) {
     next(error);
   }
@@ -137,7 +138,7 @@ router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res,
 
     if (!data) throw new NotFoundError('Period log not found');
 
-    return res.json({ message: 'Period log deleted successfully' });
+    return success(res, { message: 'Period log deleted successfully' });
   } catch (error) {
     next(error);
   }

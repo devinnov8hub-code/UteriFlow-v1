@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/admin.js';
 import { validate } from '../middleware/validate.js';
 import { body, param, query } from 'express-validator';
 import { AppError, NotFoundError } from '../errors/index.js';
+import { success } from '../utils/response.js';
 
 const router = express.Router();
 
@@ -54,7 +55,7 @@ router.get('/posts', [
     const { data, count, error } = await q;
     if (error) throw error;
 
-    return res.json({ posts: data, pagination: { total: count, limit, offset, returned: data.length } });
+    return success(res, { posts: data, pagination: { total: count, limit, offset, returned: data.length } });
   } catch (error) { next(error); }
 });
 
@@ -69,7 +70,7 @@ router.get('/posts/:id', uuidParam, validate, async (req, res, next) => {
     if (!data) throw new NotFoundError('Post not found');
 
     const { count } = await supabaseAdmin.from('comments').select('*', { count: 'exact', head: true }).eq('post_id', req.params.id);
-    return res.json({ post: { ...data, commentCount: count } });
+    return success(res, { post: { ...data, commentCount: count } });
   } catch (error) { next(error); }
 });
 
@@ -96,7 +97,7 @@ router.post('/posts', [
       .select()
       .single();
     if (error) throw error;
-    return res.status(201).json({ message: 'Post created successfully', post: data });
+    return success(res, { message: 'Post created successfully', post: data }, 201);
   } catch (error) { next(error); }
 });
 
@@ -115,7 +116,7 @@ router.patch('/posts/:id', [...uuidParam,
     const { data, error } = await supabaseAdmin.from('posts').update(updates).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Post not found');
-    return res.json({ message: 'Post updated', post: data });
+    return success(res, { message: 'Post updated', post: data });
   } catch (error) { next(error); }
 });
 
@@ -124,7 +125,7 @@ router.delete('/posts/:id', uuidParam, validate, async (req, res, next) => {
     const { data, error } = await supabaseAdmin.from('posts').delete().eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Post not found');
-    return res.json({ message: 'Post deleted successfully' });
+    return success(res, { message: 'Post deleted successfully' });
   } catch (error) { next(error); }
 });
 
@@ -141,7 +142,7 @@ router.get('/posts/:id/comments', [...uuidParam, ...paginationV], validate, asyn
       .range(offset, offset + limit - 1);
 
     if (error) throw error;
-    return res.json({ comments: data, pagination: { total: count, limit, offset } });
+    return success(res, { comments: data, pagination: { total: count, limit, offset } });
   } catch (error) { next(error); }
 });
 
@@ -150,7 +151,7 @@ router.delete('/comments/:id', uuidParam, validate, async (req, res, next) => {
     const { data, error } = await supabaseAdmin.from('comments').delete().eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Comment not found');
-    return res.json({ message: 'Comment deleted successfully' });
+    return success(res, { message: 'Comment deleted successfully' });
   } catch (error) { next(error); }
 });
 
@@ -159,7 +160,7 @@ router.patch('/comments/:id/flag', uuidParam, validate, async (req, res, next) =
     const { data, error } = await supabaseAdmin.from('comments').update({ is_flagged: true }).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Comment not found');
-    return res.json({ message: 'Comment flagged', comment: data });
+    return success(res, { message: 'Comment flagged', comment: data });
   } catch (error) { next(error); }
 });
 
@@ -200,7 +201,7 @@ router.get('/analytics', [
       weeklyActivity.push({ day: days[dayStart.getDay()], posts: dayPosts || 0, comments: dayComments || 0 });
     }
 
-    return res.json({
+    return success(res, {
       period: `${days} days`,
       stats: {
         postsPublished: postsResult.count || 0,
@@ -239,7 +240,7 @@ router.post('/users/:id/ban', [...uuidParam,
     }).select().single();
 
     if (error) throw error;
-    return res.status(201).json({ message: `User ${ban_type === 'permanent' ? 'permanently' : 'temporarily'} banned`, ban: data });
+    return success(res, { message: `User ${ban_type === 'permanent' ? 'permanently' : 'temporarily'} banned`, ban: data }, 201);
   } catch (error) { next(error); }
 });
 
@@ -247,7 +248,7 @@ router.delete('/users/:id/ban', uuidParam, validate, async (req, res, next) => {
   try {
     const { error } = await supabaseAdmin.from('user_bans').delete().eq('user_id', req.params.id);
     if (error) throw error;
-    return res.json({ message: 'User unbanned successfully' });
+    return success(res, { message: 'User unbanned successfully' });
   } catch (error) { next(error); }
 });
 

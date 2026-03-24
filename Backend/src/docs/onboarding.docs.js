@@ -1,6 +1,6 @@
 /**
  * @swagger
- * /onboarding/name:
+ * /api/v1/onboarding/name:
  *   post:
  *     summary: Set display name
  *     description: Sets the user's display name for use in the community. Requires authentication.
@@ -48,7 +48,7 @@
 
 /**
  * @swagger
- * /onboarding/age:
+ * /api/v1/onboarding/age:
  *   post:
  *     summary: Set age group
  *     description: Sets the user's age group bracket. Requires authentication.
@@ -95,7 +95,7 @@
 
 /**
  * @swagger
- * /onboarding/hormonal-status:
+ * /api/v1/onboarding/hormonal-status:
  *   post:
  *     summary: Set hormonal diagnosis status
  *     description: Records the user's hormonal diagnosis or suspicion status. Requires authentication.
@@ -142,7 +142,7 @@
 
 /**
  * @swagger
- * /onboarding/period-regularity:
+ * /api/v1/onboarding/period-regularity:
  *   post:
  *     summary: Set period regularity
  *     description: Records how regular the user's period cycle is. Requires authentication.
@@ -189,7 +189,7 @@
 
 /**
  * @swagger
- * /onboarding/health-focus:
+ * /api/v1/onboarding/health-focus:
  *   post:
  *     summary: Set health focus areas
  *     description: Sets one or more health concerns the user wants to focus on. Requires authentication.
@@ -241,7 +241,7 @@
 
 /**
  * @swagger
- * /onboarding/complete:
+ * /api/v1/onboarding/complete:
  *   post:
  *     summary: Mark onboarding as complete
  *     description: Flags the user's profile as fully onboarded. Requires authentication.
@@ -270,7 +270,7 @@
 
 /**
  * @swagger
- * /onboarding/profile:
+ * /api/v1/onboarding/profile:
  *   get:
  *     summary: Get user profile and onboarding status
  *     description: Retrieves the complete user profile including onboarding state. Requires authentication.

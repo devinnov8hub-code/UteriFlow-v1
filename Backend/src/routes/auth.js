@@ -11,6 +11,7 @@ import {
   sendPasswordChangedEmail,
 } from '../utils/email.js';
 import { ValidationError, ConflictError, NotFoundError, AppError } from '../errors/index.js';
+import { success } from '../utils/response.js';
 
 const router = express.Router();
 
@@ -35,7 +36,7 @@ router.post('/email/check', authValidators.email, validate, async (req, res, nex
       .eq('email', email)
       .maybeSingle();
     if (error) throw error;
-    return res.json({ exists: data !== null, flow: data ? 'login' : 'register' });
+    return success(res, { exists: data !== null, flow: data ? 'login' : 'register' });
   } catch (error) { next(error); }
 });
 
@@ -57,7 +58,7 @@ router.post('/email/send-otp', authValidators.email, validate, async (req, res, 
     }
 
     await sendOTPEmail(email, otpCode);
-    return res.json({ message: 'Verification code sent to your email', verificationId: verification.id });
+    return success(res, { message: 'Verification code sent to your email', verificationId: verification.id });
   } catch (error) { next(error); }
 });
 
@@ -86,7 +87,7 @@ router.post('/email/verify', authValidators.verifyOtp, validate, async (req, res
     }
 
     await supabase.from('email_verifications').update({ verified: true }).eq('id', verification.id);
-    return res.json({ message: 'Email verified successfully', verified: true, email });
+    return success(res, { message: 'Email verified successfully', verified: true, email });
   } catch (error) { next(error); }
 });
 
@@ -111,7 +112,7 @@ router.post('/email/resend', authValidators.email, validate, async (req, res, ne
     }
 
     await sendOTPEmail(email, otpCode);
-    return res.json({ message: 'A new verification code has been sent to your email', verificationId: verification.id });
+    return success(res, { message: 'A new verification code has been sent to your email', verificationId: verification.id });
   } catch (error) { next(error); }
 });
 
@@ -165,11 +166,11 @@ router.post('/password/create', authValidators.createPassword, validate, async (
 
     sendWelcomeEmail(email, null).catch((e) => console.error('[Email] Welcome email failed:', e.message));
 
-    return res.status(201).json({
+    return success(res, {
       message: 'Account created successfully',
       user: { id: user.id, email: user.email, createdAt: user.created_at },
       session: session ? { accessToken: session.access_token, refreshToken: session.refresh_token, expiresAt: session.expires_at } : null,
-    });
+    }, 201);
   } catch (error) { next(error); }
 });
 
@@ -189,7 +190,7 @@ router.post('/login', authValidators.createPassword, validate, async (req, res, 
       await authedClient.from('user_profiles').insert({ id: authData.user.id, email, onboarding_completed: false }).maybeSingle();
     }
 
-    return res.json({
+    return success(res, {
       message: 'Logged in successfully',
       user: { id: authData.user.id, email: authData.user.email, createdAt: authData.user.created_at },
       session: { accessToken: authData.session.access_token, refreshToken: authData.session.refresh_token, expiresAt: authData.session.expires_at },
@@ -203,7 +204,7 @@ router.post('/token/refresh', async (req, res, next) => {
     if (!refreshToken) throw new ValidationError('Refresh token is required.');
     const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
     if (error || !data?.session) throw new ValidationError('Invalid or expired refresh token. Please log in again.');
-    return res.json({
+    return success(res, {
       message: 'Token refreshed successfully',
       session: { accessToken: data.session.access_token, refreshToken: data.session.refresh_token, expiresAt: data.session.expires_at },
     });
@@ -214,7 +215,7 @@ router.post('/logout', async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) await supabase.auth.signOut();
-    return res.json({ message: 'Logged out successfully' });
+    return success(res, { message: 'Logged out successfully' });
   } catch (error) { next(error); }
 });
 
@@ -237,7 +238,7 @@ router.post('/password/forgot', authValidators.email, validate, async (req, res,
       await sendPasswordResetOTPEmail(email, otpCode);
     }
 
-    return res.json({ message: 'If an account with this email exists, a 6-digit reset code has been sent to your email.' });
+    return success(res, { message: 'If an account with this email exists, a 6-digit reset code has been sent to your email.' });
   } catch (error) { next(error); }
 });
 
@@ -267,7 +268,7 @@ router.post('/password/verify-code', authValidators.verifyResetCode, validate, a
 
     await supabase.from('email_verifications').update({ verified: true }).eq('id', verification.id);
 
-    return res.json({
+    return success(res, {
       message: 'Code verified. You may now set a new password.',
       resetToken: verification.id,
       email,
@@ -306,7 +307,7 @@ router.post('/password/reset', authValidators.resetPassword, validate, async (re
 
     sendPasswordChangedEmail(verification.email).catch((e) => console.error('[Email] Password changed email failed:', e.message));
 
-    return res.json({ message: 'Password reset successfully. You can now log in with your new password.' });
+    return success(res, { message: 'Password reset successfully. You can now log in with your new password.' });
   } catch (error) { next(error); }
 });
 
