@@ -1,27 +1,10 @@
-/**
- * src/config/swagger.js
- *
- * Fully inlined OpenAPI spec — no filesystem glob, works perfectly on Vercel.
- *
- * IMPORTANT: The server URL already ends in /api/v1, so all paths here
- * start WITHOUT /api/v1 (e.g. /auth/login, not /api/v1/auth/login).
- * That was causing the double-prefix bug: /api/v1/api/v1/auth/login.
- */
 
-const PROD_URL = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}/api/v1`
-  : process.env.API_URL
-    ? `${process.env.API_URL}/api/v1`
-    : null;
-
-const servers = PROD_URL
-  ? [
-      { url: PROD_URL,                       description: 'Production' },
-      { url: 'http://localhost:3000/api/v1', description: 'Local development' },
-    ]
-  : [
-      { url: 'http://localhost:3000/api/v1', description: 'Local development' },
-    ];
+const servers = [
+  {
+    url: '/api/v1',
+    description: 'Same origin',
+  },
+];
 
 export const swaggerSpec = {
   openapi: '3.0.0',

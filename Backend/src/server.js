@@ -23,7 +23,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
       styleSrc:  ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
       imgSrc:    ["'self'", "data:", "https:"],
-      connectSrc:["'self'"],
+      connectSrc:["'self'", "https:", "http:"],
       workerSrc: ["blob:"],
     },
   },
@@ -88,7 +88,7 @@ app.get('/api-docs', (req, res) => {
   <script>
     window.onload = () => {
       SwaggerUIBundle({
-        url: '/api-docs/swagger.json',
+        url: window.location.origin + '/api-docs/swagger.json',
         dom_id: '#swagger-ui',
         presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
         layout: 'StandaloneLayout',
