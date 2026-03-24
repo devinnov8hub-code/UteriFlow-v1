@@ -1,4 +1,18 @@
 import swaggerJsdoc from 'swagger-jsdoc';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = dirname(__filename);
+
+const getServers = () => {
+  const servers = [];
+  if (process.env.RENDER_EXTERNAL_URL) {
+    servers.push({ url: `${process.env.RENDER_EXTERNAL_URL}/api/v1`, description: 'Production (Render)' });
+  }
+  servers.push({ url: 'http://localhost:3000/api/v1', description: 'Local development' });
+  return servers;
+};
 
 const options = {
   definition: {
@@ -6,22 +20,17 @@ const options = {
     info: {
       title: 'UteriFlow API',
       version: '1.0.0',
-      description:
-        'Authentication, onboarding, and period tracking API for UteriFlow — powered by Supabase.',
+      description: 'Authentication, onboarding, and period tracking API for UteriFlow — powered by Supabase.',
       contact: { name: 'UteriFlow Team' },
     },
-    servers: [
-      { url: 'http://localhost:3000/api/v1', description: 'Development' },
-      { url: 'https://domain.com/api/v1', description: 'Production' },
-    ],
+    servers: getServers(),
     components: {
       securitySchemes: {
         bearerAuth: {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description:
-            'JWT access token from Supabase. Obtain via POST /auth/login or POST /auth/password/create.',
+          description: 'JWT access token from Supabase. Obtain via POST /auth/login or POST /auth/password/create.',
         },
       },
       schemas: {
@@ -121,7 +130,7 @@ const options = {
       { name: 'Admin', description: 'Admin-only: user management, stats, period log oversight' },
     ],
   },
-  apis: ['./src/docs/*.js'],
+  apis: [join(__dirname, '../docs/*.js')],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
