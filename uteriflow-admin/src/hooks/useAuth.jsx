@@ -46,8 +46,10 @@ export function AuthProvider({ children }) {
     if (!refreshToken) { clearSession(); return }
 
     try {
-      const data = await api.refreshToken(refreshToken)
-      const s = data.session
+      const res = await api.refreshToken(refreshToken)
+      const payload = res?.data ?? res
+      const s = payload.session
+      if (!s?.accessToken) { clearSession(); return }
       saveSession(s.accessToken, s.refreshToken, s.expiresAt)
       scheduleRefresh(s.expiresAt)
     } catch {
@@ -72,12 +74,15 @@ export function AuthProvider({ children }) {
   }, [])
 
   const login = async (email, password) => {
-    const data = await api.login({ email, password })
-    const s = data.session
+    const res = await api.login({ email, password })
+    // Backend wraps responses as { status, data: { session, user } }
+    const payload = res?.data ?? res
+    const s = payload.session
+    if (!s?.accessToken) throw new Error('Login failed: no session returned')
     saveSession(s.accessToken, s.refreshToken, s.expiresAt)
-    setUser(data.user)
+    setUser(payload.user)
     scheduleRefresh(s.expiresAt)
-    return data
+    return payload
   }
 
   const logout = async () => {

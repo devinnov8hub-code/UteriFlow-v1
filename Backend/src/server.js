@@ -16,6 +16,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+app.set('trust proxy', 1);
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -136,9 +138,9 @@ const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
 if (!isVercel) {
   app.listen(PORT, async () => {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error('\n⚠️  WARNING: SUPABASE_SERVICE_ROLE_KEY is not set — admin routes will fail\n');
+      console.error('\n WARNING: SUPABASE_SERVICE_ROLE_KEY is not set — admin routes will fail\n');
     } else {
-      console.log('[Supabase] ✅ Service role key loaded — admin routes active');
+      console.log('[Supabase] Service role key loaded — admin routes active');
     }
     console.log(`\nUteriFlow API running — port ${PORT} [${NODE_ENV}]`);
     console.log(`Swagger docs: http://localhost:${PORT}/api-docs`);
@@ -160,12 +162,12 @@ if (!isVercel) {
           connectionTimeout: 8000,
         });
         await transporter.verify();
-        console.log(`[SMTP] ✅ Connected to ${smtpHost} — emails will be sent via Resend\n`);
+        console.log(`[SMTP] Connected to ${smtpHost} — emails will be sent via Resend\n`);
       } catch (err) {
-        console.error(`[SMTP] ❌ Connection FAILED: ${err.message}\n`);
+        console.error(`[SMTP] Connection FAILED: ${err.message}\n`);
       }
     } else {
-      console.warn('[SMTP] ⚠️  No SMTP config — emails will print to console only.\n');
+      console.warn('[SMTP]  No SMTP config — emails will print to console only.\n');
     }
   });
 }
