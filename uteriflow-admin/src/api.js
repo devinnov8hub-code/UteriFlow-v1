@@ -11,7 +11,15 @@ client.interceptors.request.use(cfg => {
 })
 
 client.interceptors.response.use(
-  r => r.data,
+  r => {
+    // Backend wraps all responses as { status: 'success', data: {...}, error: null }
+    // Unwrap to give pages the inner data directly
+    const body = r.data
+    if (body && body.status === 'success' && body.data !== undefined) {
+      return body.data
+    }
+    return body
+  },
   err => {
     const data   = err.response?.data
     const status = err.response?.status

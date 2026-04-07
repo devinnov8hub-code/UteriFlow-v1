@@ -101,9 +101,8 @@ export default function UsersPage() {
     setLoading(true)
     try {
       const res = await api.getUsers({ limit, offset, search: search || undefined })
-      const payload = res?.data ?? res
-      setUsers(payload.users ?? [])
-      setTotal(payload.pagination?.total ?? 0)
+      setUsers(res.users ?? [])
+      setTotal(res.pagination?.total ?? 0)
     } catch (e) {
       toast.error(e.message || 'Failed to load users')
     } finally { setLoading(false) }

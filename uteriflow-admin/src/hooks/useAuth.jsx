@@ -46,8 +46,7 @@ export function AuthProvider({ children }) {
     if (!refreshToken) { clearSession(); return }
 
     try {
-      const res = await api.refreshToken(refreshToken)
-      const payload = res?.data ?? res
+      const payload = await api.refreshToken(refreshToken)
       const s = payload.session
       if (!s?.accessToken) { clearSession(); return }
       saveSession(s.accessToken, s.refreshToken, s.expiresAt)
@@ -74,9 +73,8 @@ export function AuthProvider({ children }) {
   }, [])
 
   const login = async (email, password) => {
-    const res = await api.login({ email, password })
-    // Backend wraps responses as { status, data: { session, user } }
-    const payload = res?.data ?? res
+    // Interceptor now returns the inner data directly: { session, user }
+    const payload = await api.login({ email, password })
     const s = payload.session
     if (!s?.accessToken) throw new Error('Login failed: no session returned')
     saveSession(s.accessToken, s.refreshToken, s.expiresAt)

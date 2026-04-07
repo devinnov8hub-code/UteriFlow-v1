@@ -25,7 +25,7 @@ export default function NotificationsPage() {
         payload.userIds = userIds.split(',').map(s => s.trim()).filter(Boolean)
       }
       const res = await api.broadcastNotification(payload)
-      const msg = (res?.data ?? res)?.message ?? 'Notification sent!'
+      const msg = res?.message ?? 'Notification sent!'
       toast.success(msg)
       setTitle(''); setBody(''); setUserIds('')
     } catch (e) {
