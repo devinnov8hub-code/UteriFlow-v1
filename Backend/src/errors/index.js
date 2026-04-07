@@ -18,7 +18,8 @@ export class ConflictError extends AppError {
   constructor(message) {
     super(message, 409, 'CONFLICT');
   }
-}
+} 
+
 
 export class NotFoundError extends AppError {
   constructor(message) {

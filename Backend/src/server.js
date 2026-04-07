@@ -5,31 +5,36 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { swaggerSpec } from './config/swagger.js';
-import authRoutes from './routes/auth.js';
-import onboardingRoutes from './routes/onboarding.js';
-import periodRoutes from './routes/period.js';
-import adminRoutes from './routes/admin.js';
-import communityRoutes from './routes/community.js';
+import authRoutes         from './routes/auth.js';
+import onboardingRoutes   from './routes/onboarding.js';
+import periodRoutes       from './routes/period.js';
+import adminRoutes        from './routes/admin.js';
+import communityAdminRoutes from './routes/community.js';
+import userCommunityRoutes from './routes/user_community.js';
+import profileRoutes      from './routes/profile.js';
+import notificationRoutes from './routes/notifications.js';
 import { AppError } from './errors/index.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+// Trust Vercel's reverse proxy — required for express-rate-limit
 app.set('trust proxy', 1);
 
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
-      styleSrc:  ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
-      imgSrc:    ["'self'", "data:", "https:"],
-      connectSrc:["'self'", "https:", "http:"],
-      workerSrc: ["blob:"],
+      scriptSrc:  ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
+      styleSrc:   ["'self'", "'unsafe-inline'", "unpkg.com", "cdn.jsdelivr.net"],
+      imgSrc:     ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https:", "http:"],
+      workerSrc:  ["blob:"],
     },
   },
 }));
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN?.split(',') || '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -59,16 +64,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/', (req, res) => res.json({ name: 'UteriFlow API', version: '1.0.0', documentation: '/api-docs', health: '/health' }));
+app.get('/',       (req, res) => res.json({ name: 'UteriFlow API', version: '2.0.0', documentation: '/api-docs', health: '/health' }));
 app.get('/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString(), env: NODE_ENV }));
 
-// ─── Swagger: serve spec as JSON ──────────────────────────────────────────────
+// ─── Swagger ──────────────────────────────────────────────────
 app.get('/api-docs/swagger.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerSpec);
 });
 
-// ─── Swagger: CDN-based UI (avoids Vercel MIME-type issues with swagger-ui-express) ──
 app.get('/api-docs', (req, res) => {
   res.setHeader('Content-Type', 'text/html');
   res.send(`<!DOCTYPE html>
@@ -78,10 +82,7 @@ app.get('/api-docs', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UteriFlow API Docs</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
-  <style>
-    body { margin: 0; }
-    .swagger-ui .topbar { display: none; }
-  </style>
+  <style>body { margin: 0; } .swagger-ui .topbar { display: none; }</style>
 </head>
 <body>
   <div id="swagger-ui"></div>
@@ -102,38 +103,37 @@ app.get('/api-docs', (req, res) => {
 </html>`);
 });
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-app.use('/api/v1/auth',       authLimiter, authRoutes);
-app.use('/api/v1/onboarding', onboardingRoutes);
-app.use('/api/v1/period',     periodRoutes);
-app.use('/api/v1/admin',      adminRoutes);
-app.use('/api/v1/admin',      communityRoutes);
+// ─── Routes ───────────────────────────────────────────────────
+app.use('/api/v1/auth',          authLimiter, authRoutes);
+app.use('/api/v1/onboarding',    onboardingRoutes);
+app.use('/api/v1/period',        periodRoutes);
+app.use('/api/v1/community',     userCommunityRoutes);
+app.use('/api/v1/profile',       profileRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/admin',         adminRoutes);
+app.use('/api/v1/admin',         communityAdminRoutes);
 
-// ─── 404 ──────────────────────────────────────────────────────────────────────
+// ─── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} not found`, code: 'NOT_FOUND' }));
 
-// ─── Error handler ────────────────────────────────────────────────────────────
+// ─── Error handler ────────────────────────────────────────────
 app.use((err, req, res, next) => {
   const errResponse = (statusCode, message, code) =>
     res.status(statusCode).json({ status: 'error', data: null, error: { message, code } });
 
-  if (err instanceof AppError) {
-    return errResponse(err.statusCode, err.message, err.code || 'ERROR');
-  }
+  if (err instanceof AppError) return errResponse(err.statusCode, err.message, err.code || 'ERROR');
+
   const isSupabaseError = err?.message && (err.code || err.details || err.hint);
   if (isSupabaseError) {
     console.error('[Supabase Error]', { message: err.message, code: err.code, details: err.details });
     return errResponse(500, 'A database error occurred.', 'DATABASE_ERROR');
   }
+
   console.error('[Unhandled Error]', err);
-  return errResponse(
-    500,
-    NODE_ENV === 'production' ? 'Internal server error.' : err.message,
-    'INTERNAL_ERROR'
-  );
+  return errResponse(500, NODE_ENV === 'production' ? 'Internal server error.' : err.message, 'INTERNAL_ERROR');
 });
 
-// ─── Start (local dev only — Vercel uses export default) ──────────────────────
+// ─── Start (local dev only) ───────────────────────────────────
 const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
 if (!isVercel) {
   app.listen(PORT, async () => {
@@ -142,7 +142,7 @@ if (!isVercel) {
     } else {
       console.log('[Supabase] Service role key loaded — admin routes active');
     }
-    console.log(`\nUteriFlow API running — port ${PORT} [${NODE_ENV}]`);
+    console.log(`\nUteriFlow API v2.0 running — port ${PORT} [${NODE_ENV}]`);
     console.log(`Swagger docs: http://localhost:${PORT}/api-docs`);
     console.log(`Health:       http://localhost:${PORT}/health\n`);
 
@@ -162,9 +162,9 @@ if (!isVercel) {
           connectionTimeout: 8000,
         });
         await transporter.verify();
-        console.log(`[SMTP] Connected to ${smtpHost} — emails will be sent via Resend\n`);
+        console.log(`[SMTP] Connected to ${smtpHost}\n`);
       } catch (err) {
-        console.error(`[SMTP] Connection FAILED: ${err.message}\n`);
+        console.error(`[SMTP]  Connection FAILED: ${err.message}\n`);
       }
     } else {
       console.warn('[SMTP]  No SMTP config — emails will print to console only.\n');

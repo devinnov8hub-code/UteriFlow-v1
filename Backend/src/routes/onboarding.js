@@ -8,7 +8,6 @@ import { success } from '../utils/response.js';
 import { sendOnboardingCompleteEmail } from '../utils/email.js';
 
 const router = express.Router();
-
 router.use(authenticateUser);
 
 const updateProfile = async (userId, fields) => {
@@ -56,6 +55,28 @@ router.post('/health-focus', onboardingValidators.healthFocus, validate, async (
   } catch (error) { next(error); }
 });
 
+/**
+ * NEW — Personality step
+ * Saves personality_type, motivation_style, notification_pref.
+ * These drive dashboard personalization and notification behaviour.
+ */
+router.post('/personality', onboardingValidators.personality, validate, async (req, res, next) => {
+  try {
+    const { personalityType, motivationStyle, notificationPref } = req.body;
+    await updateProfile(req.user.id, {
+      personality_type:  personalityType,
+      motivation_style:  motivationStyle,
+      notification_pref: notificationPref ?? 'important_only',
+    });
+    return success(res, {
+      message: 'Personality preferences saved successfully',
+      personalityType,
+      motivationStyle,
+      notificationPref: notificationPref ?? 'important_only',
+    });
+  } catch (error) { next(error); }
+});
+
 router.post('/complete', async (req, res, next) => {
   try {
     await updateProfile(req.user.id, {
@@ -80,7 +101,11 @@ router.post('/complete', async (req, res, next) => {
 
 router.get('/profile', async (req, res, next) => {
   try {
-    const { data, error } = await supabase.from('user_profiles').select('*').eq('id', req.user.id).maybeSingle();
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', req.user.id)
+      .maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Profile not found');
     return success(res, { profile: data });

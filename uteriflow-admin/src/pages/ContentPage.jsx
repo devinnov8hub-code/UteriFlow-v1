@@ -56,7 +56,7 @@ async function uploadToSupabase(file, token) {
   return `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`
 }
 
-function CommentItem({ comment, onDelete, onFlag, onBan }) {
+function CommentItem({ comment, onDelete, onFlag, onUnflag, onBan }) {
   const name = comment.author?.display_name || comment.author?.email || 'Anonymous'
   const ago  = comment.created_at
     ? formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })
@@ -91,6 +91,9 @@ function CommentItem({ comment, onDelete, onFlag, onBan }) {
             }
             items={[
               { icon: '🗑', label: 'Delete comment',  onClick: () => onDelete(comment.id),              danger: true },
+              comment.is_flagged
+                ? { icon: '🏳️', label: 'Unflag comment', onClick: () => onUnflag(comment.id) }
+                : { icon: '🚩', label: 'Flag comment',   onClick: () => onFlag(comment.id)   },
               '---',
               { icon: '⏱', label: 'Ban (7 days)',     onClick: () => onBan(comment.author_id, 7),       danger: true },
               { icon: '🚫', label: 'Ban permanently',  onClick: () => onBan(comment.author_id, null),   danger: true },
@@ -118,7 +121,7 @@ function CommentItem({ comment, onDelete, onFlag, onBan }) {
   )
 }
 
-function PostItem({ post, isSelected, onSelect, onDelete, onBan }) {
+function PostItem({ post, isSelected, onSelect, onDelete, onBan, onUnflag, onTogglePublish }) {
   const excerpt = post.content?.length > 180
     ? post.content.slice(0, 180) + '…'
     : post.content
@@ -175,12 +178,16 @@ function PostItem({ post, isSelected, onSelect, onDelete, onBan }) {
               </button>
             }
             items={[
-              { icon: '💬', label: 'View comments',   onClick: () => onSelect(post.id)                              },
-              { icon: '🗑', label: 'Delete post',      onClick: () => onDelete(post.id),             danger: true   },
+              { icon: '💬', label: 'View comments',                  onClick: () => onSelect(post.id)                                                          },
+              { icon: post.is_published ? '🙈' : '✅', label: post.is_published ? 'Unpublish' : 'Publish', onClick: () => onTogglePublish(post.id, post.is_published) },
+              post.is_flagged
+                ? { icon: '🏳️', label: 'Unflag post',   onClick: () => onUnflag(post.id)                                       }
+                : null,
+              { icon: '🗑', label: 'Delete post',                    onClick: () => onDelete(post.id),             danger: true   },
               '---',
-              { icon: '⏱', label: 'Ban author (7d)',  onClick: () => onBan(post.author_id, 7),       danger: true   },
-              { icon: '🚫', label: 'Ban permanently',  onClick: () => onBan(post.author_id, null),   danger: true   },
-            ]}
+              { icon: '⏱', label: 'Ban author (7d)',                 onClick: () => onBan(post.author_id, 7),       danger: true   },
+              { icon: '🚫', label: 'Ban permanently',                 onClick: () => onBan(post.author_id, null),   danger: true   },
+            ].filter(Boolean)}
           />
         </div>
       </div>
@@ -390,6 +397,10 @@ function CommentsPanel({ postId, onBan, isMobileOpen, onClose }) {
     try { await api.flagComment(id); toast.success('Comment flagged'); load() }
     catch (e) { toast.error(e.message || 'Failed to flag') }
   }
+  async function handleUnflag(id) {
+    try { await api.unflagComment(id); toast.success('Comment unflagged'); load() }
+    catch (e) { toast.error(e.message || 'Failed to unflag') }
+  }
 
   const inner = (
     <div style={{ background: 'white', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -415,6 +426,7 @@ function CommentsPanel({ postId, onBan, isMobileOpen, onClose }) {
             comment={c}
             onDelete={handleDelete}
             onFlag={handleFlag}
+            onUnflag={handleUnflag}
             onBan={onBan}
           />
         ))}
@@ -556,6 +568,22 @@ export default function ContentPage() {
     finally { setBanning(false) }
   }
 
+  async function handleUnflagPost(id) {
+    try {
+      await api.updatePost(id, { is_flagged: false })
+      toast.success('Post unflagged')
+      loadPosts()
+    } catch (e) { toast.error(e.message || 'Failed to unflag post') }
+  }
+
+  async function handleTogglePublish(id, currentlyPublished) {
+    try {
+      await api.updatePost(id, { is_published: !currentlyPublished })
+      toast.success(currentlyPublished ? 'Post unpublished' : 'Post published')
+      loadPosts()
+    } catch (e) { toast.error(e.message || 'Failed to update post') }
+  }
+
   return (
     <div>
       <style>{`
@@ -636,6 +664,8 @@ export default function ContentPage() {
                   onSelect={selectPost}
                   onDelete={setDeleteTarget}
                   onBan={(uid, d) => setBanTarget({ userId: uid, days: d })}
+                  onUnflag={handleUnflagPost}
+                  onTogglePublish={handleTogglePublish}
                 />
               ))}
             </div>

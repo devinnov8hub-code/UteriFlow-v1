@@ -17,9 +17,13 @@ export const swaggerSpec = {
   servers,
   tags: [
     { name: 'Authentication', description: 'Register, login, OTP verification, token management' },
-    { name: 'Onboarding',     description: 'Step-by-step user profile setup' },
-    { name: 'Period Tracking',description: 'Log and manage period cycles' },
+    { name: 'Onboarding',     description: 'Step-by-step user profile setup including personality' },
+    { name: 'Period Tracking',description: 'Log cycles, symptoms, predictions and dashboard summary' },
+    { name: 'Community',      description: 'User-facing posts, likes, bookmarks, comments' },
+    { name: 'Profile',        description: 'View and update user profile' },
+    { name: 'Notifications',  description: 'In-app notifications for the current user' },
     { name: 'Admin',          description: 'Admin-only: user management, stats, period log oversight' },
+    { name: 'Admin Community',description: 'Admin-only: post/comment moderation and analytics' },
   ],
   components: {
     securitySchemes: {
@@ -55,10 +59,17 @@ export const swaggerSpec = {
           id:                      { type: 'string', format: 'uuid' },
           email:                   { type: 'string', format: 'email' },
           display_name:            { type: 'string', nullable: true },
+          bio:                     { type: 'string', nullable: true },
+          avatar_url:              { type: 'string', nullable: true },
           age_group:               { type: 'string', nullable: true },
           hormonal_status:         { type: 'string', nullable: true },
           period_regularity:       { type: 'string', nullable: true },
           health_focus:            { type: 'array', items: { type: 'string' } },
+          personality_type:        { type: 'string', nullable: true },
+          motivation_style:        { type: 'string', nullable: true },
+          notification_pref:       { type: 'string', nullable: true },
+          cycle_length_avg:        { type: 'integer', default: 28 },
+          period_length_avg:       { type: 'integer', default: 5 },
           onboarding_completed:    { type: 'boolean' },
           onboarding_completed_at: { type: 'string', format: 'date-time', nullable: true },
           created_at:              { type: 'string', format: 'date-time' },
@@ -76,6 +87,92 @@ export const swaggerSpec = {
           is_first_log: { type: 'boolean' },
           created_at:   { type: 'string', format: 'date-time' },
           updated_at:   { type: 'string', format: 'date-time' },
+        },
+      },
+      SymptomLog: {
+        type: 'object',
+        properties: {
+          id:          { type: 'string', format: 'uuid' },
+          user_id:     { type: 'string', format: 'uuid' },
+          log_id:      { type: 'string', format: 'uuid', nullable: true },
+          logged_date: { type: 'string', format: 'date' },
+          symptoms:    { type: 'array', items: { type: 'string' } },
+          flow_level:  { type: 'string', nullable: true },
+          mood:        { type: 'array', items: { type: 'string' } },
+          pain_level:  { type: 'integer', nullable: true },
+          notes:       { type: 'string', nullable: true },
+          created_at:  { type: 'string', format: 'date-time' },
+        },
+      },
+      CyclePrediction: {
+        type: 'object',
+        properties: {
+          id:                   { type: 'string', format: 'uuid' },
+          user_id:              { type: 'string', format: 'uuid' },
+          predicted_start:      { type: 'string', format: 'date' },
+          predicted_end:        { type: 'string', format: 'date', nullable: true },
+          fertile_window_start: { type: 'string', format: 'date', nullable: true },
+          fertile_window_end:   { type: 'string', format: 'date', nullable: true },
+          ovulation_date:       { type: 'string', format: 'date', nullable: true },
+          is_current:           { type: 'boolean' },
+          created_at:           { type: 'string', format: 'date-time' },
+        },
+      },
+      Post: {
+        type: 'object',
+        properties: {
+          id:            { type: 'string', format: 'uuid' },
+          author_id:     { type: 'string', format: 'uuid', nullable: true },
+          author:        { type: 'object', nullable: true, properties: { id: { type: 'string' }, display_name: { type: 'string' }, avatar_url: { type: 'string', nullable: true } } },
+          title:         { type: 'string' },
+          content:       { type: 'string' },
+          image_url:     { type: 'string', nullable: true },
+          category:      { type: 'string', enum: ['community', 'lifestyle_tips', 'discord'] },
+          likes_count:   { type: 'integer' },
+          shares_count:  { type: 'integer' },
+          is_flagged:    { type: 'boolean' },
+          is_published:  { type: 'boolean' },
+          is_liked:      { type: 'boolean', description: 'Whether the requesting user liked this post' },
+          is_bookmarked: { type: 'boolean', description: 'Whether the requesting user bookmarked this post' },
+          created_at:    { type: 'string', format: 'date-time' },
+          updated_at:    { type: 'string', format: 'date-time' },
+        },
+      },
+      Comment: {
+        type: 'object',
+        properties: {
+          id:            { type: 'string', format: 'uuid' },
+          post_id:       { type: 'string', format: 'uuid' },
+          author_id:     { type: 'string', format: 'uuid', nullable: true },
+          author:        { type: 'object', nullable: true, properties: { id: { type: 'string' }, display_name: { type: 'string' }, avatar_url: { type: 'string', nullable: true } } },
+          parent_id:     { type: 'string', format: 'uuid', nullable: true },
+          content:       { type: 'string' },
+          is_flagged:    { type: 'boolean' },
+          likes_count:   { type: 'integer' },
+          replies_count: { type: 'integer' },
+          created_at:    { type: 'string', format: 'date-time' },
+        },
+      },
+      Notification: {
+        type: 'object',
+        properties: {
+          id:         { type: 'string', format: 'uuid' },
+          user_id:    { type: 'string', format: 'uuid' },
+          type:       { type: 'string', enum: ['period_reminder','ovulation_reminder','cycle_summary','community_reply','community_like','community_mention','tip','system'] },
+          title:      { type: 'string' },
+          body:       { type: 'string' },
+          data:       { type: 'object' },
+          is_read:    { type: 'boolean' },
+          created_at: { type: 'string', format: 'date-time' },
+        },
+      },
+      Pagination: {
+        type: 'object',
+        properties: {
+          total:    { type: 'integer' },
+          limit:    { type: 'integer' },
+          offset:   { type: 'integer' },
+          returned: { type: 'integer' },
         },
       },
     },
@@ -933,5 +1030,452 @@ export const swaggerSpec = {
         },
       },
     },
+
+    // ── PERSONALITY (ONBOARDING) ─────────────────────────────────────────────
+    '/onboarding/personality': {
+      post: {
+        tags: ['Onboarding'],
+        summary: 'Set personality type and motivation style',
+        description: 'Saves personality_type, motivation_style, and notification_pref. These drive the dashboard personalised tip, notification frequency, and community prompts.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['personalityType', 'motivationStyle'],
+                properties: {
+                  personalityType: { type: 'string', enum: ['cycle_sharer', 'health_optimizer', 'silent_tracker', 'community_seeker'], example: 'health_optimizer' },
+                  motivationStyle: { type: 'string', enum: ['gentle_reminders', 'data_driven', 'community_support', 'minimal_nudges'], example: 'data_driven' },
+                  notificationPref: { type: 'string', enum: ['all', 'important_only', 'none'], default: 'important_only' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Personality preferences saved' },
+          400: { $ref: '#/components/responses/ValidationError' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── SYMPTOMS ─────────────────────────────────────────────────────────────
+    '/period/symptoms': {
+      post: {
+        tags: ['Period Tracking'],
+        summary: 'Log symptoms for a day',
+        description: 'Log physical symptoms, flow level, mood, and pain level. Optionally link to a period log via logId.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['symptoms'],
+                properties: {
+                  loggedDate: { type: 'string', format: 'date', example: '2026-04-03' },
+                  logId: { type: 'string', format: 'uuid', nullable: true },
+                  symptoms: {
+                    type: 'array',
+                    items: { type: 'string', enum: ['cramps','bloating','headache','backache','nausea','fatigue','breast_tenderness','acne','mood_swings','spotting','insomnia','food_cravings','hot_flashes','other'] },
+                    example: ['cramps', 'fatigue'],
+                  },
+                  flowLevel: { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'], nullable: true, example: 'medium' },
+                  mood: { type: 'array', items: { type: 'string', enum: ['happy','sad','anxious','irritable','calm','energetic','depressed','emotional'] }, example: ['anxious'] },
+                  painLevel: { type: 'integer', minimum: 1, maximum: 10, nullable: true, example: 6 },
+                  notes: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Symptoms logged', content: { 'application/json': { schema: { type: 'object', properties: { symptomLog: { $ref: '#/components/schemas/SymptomLog' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'List symptom logs',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'limit', schema: { type: 'integer', default: 30 } },
+          { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } },
+        ],
+        responses: {
+          200: { description: 'Symptom logs', content: { 'application/json': { schema: { type: 'object', properties: { symptoms: { type: 'array', items: { $ref: '#/components/schemas/SymptomLog' } }, total: { type: 'integer' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── CYCLE PREDICTION ──────────────────────────────────────────────────────
+    '/period/prediction': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'Get current cycle prediction',
+        description: 'Returns predicted next period start/end, ovulation date, and fertile window. Auto-recalculated on every period log.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: { description: 'Cycle prediction', content: { 'application/json': { schema: { type: 'object', properties: { prediction: { $ref: '#/components/schemas/CyclePrediction' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── DASHBOARD SUMMARY ────────────────────────────────────────────────────
+    '/period/summary': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'Home screen dashboard summary',
+        description: 'Returns cycle phase, days until next period, personalised tip (driven by personality_type), today\'s symptoms, and current prediction. Primary endpoint for the app home screen.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Dashboard summary',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        userName: { type: 'string' },
+                        cyclePhase: { type: 'string', enum: ['menstrual', 'follicular', 'fertile', 'pms', 'unknown'] },
+                        daysUntilPeriod: { type: 'integer', nullable: true },
+                        prediction: { $ref: '#/components/schemas/CyclePrediction' },
+                        lastPeriod: { $ref: '#/components/schemas/PeriodLog' },
+                        todaySymptoms: { $ref: '#/components/schemas/SymptomLog' },
+                        personalizedTip: { type: 'string' },
+                        profile: {
+                          type: 'object',
+                          properties: {
+                            personalityType: { type: 'string' },
+                            motivationStyle: { type: 'string' },
+                            healthFocus: { type: 'array', items: { type: 'string' } },
+                            hormonalStatus: { type: 'string' },
+                            cycleLengthAvg: { type: 'integer' },
+                            periodLengthAvg: { type: 'integer' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── COMMUNITY (USER-FACING) ───────────────────────────────────────────────
+    '/community/posts': {
+      get: {
+        tags: ['Community'],
+        summary: 'List published posts',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'category', schema: { type: 'string', enum: ['community', 'lifestyle_tips', 'discord'] } },
+          { in: 'query', name: 'limit', schema: { type: 'integer', default: 20 } },
+          { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } },
+        ],
+        responses: {
+          200: { description: 'Posts with is_liked and is_bookmarked flags per user', content: { 'application/json': { schema: { type: 'object', properties: { posts: { type: 'array', items: { $ref: '#/components/schemas/Post' } }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/posts/{id}': {
+      get: {
+        tags: ['Community'],
+        summary: 'Get a single post',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Post with comment count, is_liked, is_bookmarked', content: { 'application/json': { schema: { type: 'object', properties: { post: { $ref: '#/components/schemas/Post' } } } } } },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/posts/{id}/like': {
+      post: {
+        tags: ['Community'],
+        summary: 'Toggle like on a post',
+        description: 'If already liked, removes the like. Returns liked: true/false.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Like toggled', content: { 'application/json': { schema: { type: 'object', properties: { liked: { type: 'boolean' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/posts/{id}/bookmark': {
+      post: {
+        tags: ['Community'],
+        summary: 'Toggle bookmark on a post',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Bookmark toggled', content: { 'application/json': { schema: { type: 'object', properties: { bookmarked: { type: 'boolean' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/posts/{id}/comments': {
+      get: {
+        tags: ['Community'],
+        summary: 'List top-level comments on a post',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer', default: 30 } },
+          { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } },
+        ],
+        responses: {
+          200: { description: 'Comments with author info', content: { 'application/json': { schema: { type: 'object', properties: { comments: { type: 'array', items: { $ref: '#/components/schemas/Comment' } }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+      post: {
+        tags: ['Community'],
+        summary: 'Post a comment or reply',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['content'],
+                properties: {
+                  content: { type: 'string', maxLength: 2000, example: 'This really helped me!' },
+                  parentId: { type: 'string', format: 'uuid', nullable: true, description: 'Set to reply to another comment' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Comment created', content: { 'application/json': { schema: { type: 'object', properties: { comment: { $ref: '#/components/schemas/Comment' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/posts/{id}/report': {
+      post: {
+        tags: ['Community'],
+        summary: 'Report a post',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', maxLength: 500 } } } } } },
+        responses: {
+          200: { description: 'Post reported and flagged for admin review' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/community/comments/{id}/replies': {
+      get: {
+        tags: ['Community'],
+        summary: 'Get replies to a comment',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Replies list' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+    '/community/comments/{id}/like': {
+      post: {
+        tags: ['Community'],
+        summary: 'Toggle like on a comment',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Like toggled', content: { 'application/json': { schema: { type: 'object', properties: { liked: { type: 'boolean' } } } } } }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+    '/community/bookmarks': {
+      get: {
+        tags: ['Community'],
+        summary: 'List bookmarked posts',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'limit', schema: { type: 'integer', default: 20 } },
+          { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } },
+        ],
+        responses: { 200: { description: 'Bookmarked posts' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+
+    // ── PROFILE ───────────────────────────────────────────────────────────────
+    '/profile': {
+      get: {
+        tags: ['Profile'],
+        summary: 'Get own full profile with stats',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: { description: 'Profile with postsCount and bookmarksCount', content: { 'application/json': { schema: { type: 'object', properties: { profile: { allOf: [{ $ref: '#/components/schemas/UserProfile' }, { type: 'object', properties: { stats: { type: 'object', properties: { postsCount: { type: 'integer' }, bookmarksCount: { type: 'integer' } } } } }] } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+      patch: {
+        tags: ['Profile'],
+        summary: 'Update own profile',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  displayName: { type: 'string', maxLength: 50 },
+                  bio: { type: 'string', maxLength: 500, nullable: true },
+                  avatarUrl: { type: 'string', format: 'uri', nullable: true },
+                  cycleLengthAvg: { type: 'integer', minimum: 14, maximum: 60, example: 28 },
+                  periodLengthAvg: { type: 'integer', minimum: 1, maximum: 14, example: 5 },
+                  notificationPref: { type: 'string', enum: ['all', 'important_only', 'none'] },
+                },
+              },
+            },
+          },
+        },
+        responses: { 200: { description: 'Profile updated' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+    '/profile/{id}': {
+      get: {
+        tags: ['Profile'],
+        summary: 'Get a public user profile',
+        description: 'Returns limited public info. Used for community post author pages.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Public profile with postsCount' },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+    '/notifications': {
+      get: {
+        tags: ['Notifications'],
+        summary: 'List notifications',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'limit', schema: { type: 'integer', default: 30 } },
+          { in: 'query', name: 'offset', schema: { type: 'integer', default: 0 } },
+          { in: 'query', name: 'unread_only', schema: { type: 'boolean', default: false } },
+        ],
+        responses: {
+          200: { description: 'Notifications with unreadCount', content: { 'application/json': { schema: { type: 'object', properties: { notifications: { type: 'array', items: { $ref: '#/components/schemas/Notification' } }, unreadCount: { type: 'integer' }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/notifications/read-all': {
+      patch: {
+        tags: ['Notifications'],
+        summary: 'Mark all notifications as read',
+        security: [{ bearerAuth: [] }],
+        responses: { 200: { description: 'All marked read' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+    '/notifications/{id}/read': {
+      patch: {
+        tags: ['Notifications'],
+        summary: 'Mark one notification as read',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Notification marked read' }, 404: { $ref: '#/components/responses/NotFound' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+    '/notifications/{id}': {
+      delete: {
+        tags: ['Notifications'],
+        summary: 'Delete a notification',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Notification deleted' }, 404: { $ref: '#/components/responses/NotFound' }, 401: { $ref: '#/components/responses/Unauthorized' } },
+      },
+    },
+
+    // ── ADMIN: BAN + BROADCAST ────────────────────────────────────────────────
+    '/admin/notifications/broadcast': {
+      post: {
+        tags: ['Admin'],
+        summary: 'Broadcast notification to users',
+        description: 'Sends a tip or system notification to all users or a specific list of user IDs. Leave userIds empty to broadcast to everyone.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'body', 'type'],
+                properties: {
+                  title: { type: 'string', example: 'Your period is coming up!' },
+                  body: { type: 'string', example: 'Based on your cycle, your period is expected in 3 days.' },
+                  type: { type: 'string', enum: ['tip', 'system'], example: 'tip' },
+                  userIds: { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Leave empty to broadcast to all users' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Notification sent', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string', example: 'Notification sent to 142 user(s)' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          403: { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/admin/comments/{id}/unflag': {
+      patch: {
+        tags: ['Admin Community'],
+        summary: 'Remove flag from a comment',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { 200: { description: 'Comment unflagged' }, 404: { $ref: '#/components/responses/NotFound' }, 403: { $ref: '#/components/responses/Forbidden' } },
+      },
+    },
+    '/admin/analytics': {
+      get: {
+        tags: ['Admin Community'],
+        summary: 'Community analytics',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'query', name: 'days', schema: { type: 'integer', minimum: 1, maximum: 365, default: 30 } }],
+        responses: {
+          200: {
+            description: 'Analytics data',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    period: { type: 'string' },
+                    stats: { type: 'object', properties: { postsPublished: { type: 'integer' }, comments: { type: 'integer' }, activeUsers: { type: 'integer' }, flaggedPosts: { type: 'integer' }, flaggedComments: { type: 'integer' }, totalLikes: { type: 'integer' } } },
+                    weeklyActivity: { type: 'array', items: { type: 'object', properties: { day: { type: 'string' }, posts: { type: 'integer' }, comments: { type: 'integer' }, likes: { type: 'integer' } } } },
+                  },
+                },
+              },
+            },
+          },
+          403: { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
   },
+
+  // ── SCHEMAS ───────────────────────────────────────────────────────────────
 };

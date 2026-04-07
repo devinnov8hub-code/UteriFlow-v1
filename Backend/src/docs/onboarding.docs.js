@@ -3,10 +3,8 @@
  * /api/v1/onboarding/name:
  *   post:
  *     summary: Set display name
- *     description: Sets the user's display name for use in the community. Requires authentication.
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -22,28 +20,9 @@
  *                 example: Tyress
  *     responses:
  *       200:
- *         description: Display name updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 displayName:
- *                   type: string
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Display name updated
+ *       400: { description: Validation error }
+ *       401: { description: Unauthorized }
  */
 
 /**
@@ -51,10 +30,8 @@
  * /api/v1/onboarding/age:
  *   post:
  *     summary: Set age group
- *     description: Sets the user's age group bracket. Requires authentication.
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -68,40 +45,18 @@
  *                 enum: [18-24, 25-29, 30-34, 35-39, 40-44, 45+]
  *                 example: 25-29
  *     responses:
- *       200:
- *         description: Age group updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 ageGroup:
- *                   type: string
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *       200: { description: Age group updated }
+ *       400: { description: Validation error }
+ *       401: { description: Unauthorized }
  */
 
 /**
  * @swagger
  * /api/v1/onboarding/hormonal-status:
  *   post:
- *     summary: Set hormonal diagnosis status
- *     description: Records the user's hormonal diagnosis or suspicion status. Requires authentication.
+ *     summary: Set hormonal / PCOS status
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -113,31 +68,10 @@
  *               hormonalStatus:
  *                 type: string
  *                 enum: [diagnosed, suspected, not_sure, no]
- *                 example: diagnosed
+ *                 example: suspected
  *     responses:
- *       200:
- *         description: Hormonal status updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 hormonalStatus:
- *                   type: string
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *       200: { description: Hormonal status updated }
+ *       401: { description: Unauthorized }
  */
 
 /**
@@ -145,10 +79,8 @@
  * /api/v1/onboarding/period-regularity:
  *   post:
  *     summary: Set period regularity
- *     description: Records how regular the user's period cycle is. Requires authentication.
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -160,31 +92,10 @@
  *               periodRegularity:
  *                 type: string
  *                 enum: [regular, varies_week, unpredictable, not_tracked]
- *                 example: varies_week
+ *                 example: regular
  *     responses:
- *       200:
- *         description: Period regularity updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                 periodRegularity:
- *                   type: string
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *       200: { description: Period regularity updated }
+ *       401: { description: Unauthorized }
  */
 
 /**
@@ -192,10 +103,8 @@
  * /api/v1/onboarding/health-focus:
  *   post:
  *     summary: Set health focus areas
- *     description: Sets one or more health concerns the user wants to focus on. Requires authentication.
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
  *       content:
@@ -206,37 +115,65 @@
  *             properties:
  *               healthFocus:
  *                 type: array
- *                 minItems: 1
  *                 items:
  *                   type: string
  *                   enum: [irregular_periods, weight_management, mood_swings, acne, fertility, hair_issues, fatigue, other]
- *                 example: [irregular_periods, fatigue]
+ *                 example: [irregular_periods, mood_swings]
+ *     responses:
+ *       200: { description: Health focus updated }
+ *       401: { description: Unauthorized }
+ */
+
+/**
+ * @swagger
+ * /api/v1/onboarding/personality:
+ *   post:
+ *     summary: Set personality type and motivation style
+ *     description: >
+ *       Final onboarding personality step. personalityType and motivationStyle
+ *       are used to personalise the dashboard tip, notification frequency,
+ *       and community prompts shown to the user after onboarding.
+ *     tags: [Onboarding]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [personalityType, motivationStyle]
+ *             properties:
+ *               personalityType:
+ *                 type: string
+ *                 enum: [cycle_sharer, health_optimizer, silent_tracker, community_seeker]
+ *                 description: >
+ *                   cycle_sharer — likes to share their experience;
+ *                   health_optimizer — data-focused;
+ *                   silent_tracker — private, just wants to track;
+ *                   community_seeker — comes for support and connection
+ *                 example: health_optimizer
+ *               motivationStyle:
+ *                 type: string
+ *                 enum: [gentle_reminders, data_driven, community_support, minimal_nudges]
+ *                 example: data_driven
+ *               notificationPref:
+ *                 type: string
+ *                 enum: [all, important_only, none]
+ *                 default: important_only
+ *                 example: important_only
  *     responses:
  *       200:
- *         description: Health focus areas updated successfully
+ *         description: Personality preferences saved
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
- *                   type: string
- *                 healthFocus:
- *                   type: array
- *                   items:
- *                     type: string
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *                 personalityType: { type: string }
+ *                 motivationStyle: { type: string }
+ *                 notificationPref: { type: string }
+ *       400: { description: Validation error }
+ *       401: { description: Unauthorized }
  */
 
 /**
@@ -244,42 +181,31 @@
  * /api/v1/onboarding/complete:
  *   post:
  *     summary: Mark onboarding as complete
- *     description: Flags the user's profile as fully onboarded. Requires authentication.
+ *     description: Call after all onboarding steps are done. Triggers the welcome email.
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Onboarding completed successfully
+ *         description: Onboarding marked complete
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message:
- *                   type: string
- *                 onboardingCompleted:
- *                   type: boolean
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *                 onboardingCompleted: { type: boolean, example: true }
+ *       401: { description: Unauthorized }
  */
 
 /**
  * @swagger
  * /api/v1/onboarding/profile:
  *   get:
- *     summary: Get user profile and onboarding status
- *     description: Retrieves the complete user profile including onboarding state. Requires authentication.
+ *     summary: Get current user's full profile (onboarding use)
  *     tags: [Onboarding]
- *     security:
- *       - bearerAuth: []
+ *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: User profile retrieved successfully
+ *         description: User profile
  *         content:
  *           application/json:
  *             schema:
@@ -287,16 +213,5 @@
  *               properties:
  *                 profile:
  *                   $ref: '#/components/schemas/UserProfile'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- *       404:
- *         description: Profile not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *       401: { description: Unauthorized }
  */
