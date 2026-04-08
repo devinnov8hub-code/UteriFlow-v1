@@ -35,13 +35,13 @@ export const authValidators = {
   ],
 };
 
-// ─── Onboarding ────────────────────────────────────────────────
+   
 export const onboardingValidators = {
   name: [
     body('displayName').trim().isLength({ min: 1, max: 50 }).withMessage('Display name must be between 1 and 50 characters'),
   ],
   age: [
-    body('ageGroup').isIn(['18-24', '25-29', '30-34', '35-39', '40-44', '45+']).withMessage('Invalid age group'),
+    body('ageGroup').isIn(['15-29', '30-34', '35-39', '40-44', '45-49', '50-55']).withMessage('Invalid age group'),
   ],
   hormonalStatus: [
     body('hormonalStatus').isIn(['diagnosed', 'suspected', 'not_sure', 'no']).withMessage('Invalid hormonal status'),
