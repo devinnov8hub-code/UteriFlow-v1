@@ -42,7 +42,7 @@
  *             properties:
  *               ageGroup:
  *                 type: string
- *                 enum: [18-24, 25-29, 30-34, 35-39, 40-44, 45+]
+ *                 enum: [15-29, 30-34, 35-39, 40-44, 45-49, 50-55]
  *                 example: 25-29
  *     responses:
  *       200: { description: Age group updated }

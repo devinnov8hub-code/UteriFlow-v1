@@ -465,7 +465,7 @@ export const swaggerSpec = {
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { type: 'object', required: ['ageGroup'], properties: {
-            ageGroup: { type: 'string', enum: ['15-29', '30-34', '35-39', '40-44', '45-49', '50-55'], example: '25-29' },
+            ageGroup: { type: 'string', enum: ['15-29', '30-34', '35-39', '40-44', '45-49', '50-55'], example: '15-29' },
           } } } },
         },
         responses: {
