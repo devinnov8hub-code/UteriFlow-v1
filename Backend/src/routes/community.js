@@ -27,6 +27,47 @@ const paginationV = [
 ];
 const uuidParam = [param('id').isUUID().withMessage('Invalid ID')];
 
+// ─── Helper: enrich posts with author info from user_profiles ─
+// posts.author_id → auth.users, user_profiles.id → auth.users
+// No direct FK between posts and user_profiles, so we join manually
+async function enrichPostsWithAuthors(posts) {
+  if (!posts || posts.length === 0) return posts;
+  const authorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
+  if (authorIds.length === 0) return posts;
+
+  const { data: profiles } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id, display_name, email, avatar_url')
+    .in('id', authorIds);
+
+  const profileMap = {};
+  for (const p of (profiles ?? [])) profileMap[p.id] = p;
+
+  return posts.map(p => ({
+    ...p,
+    author: p.author_id ? (profileMap[p.author_id] ?? null) : null,
+  }));
+}
+
+async function enrichCommentsWithAuthors(comments) {
+  if (!comments || comments.length === 0) return comments;
+  const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))];
+  if (authorIds.length === 0) return comments;
+
+  const { data: profiles } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id, display_name, email, avatar_url')
+    .in('id', authorIds);
+
+  const profileMap = {};
+  for (const p of (profiles ?? [])) profileMap[p.id] = p;
+
+  return comments.map(c => ({
+    ...c,
+    author: c.author_id ? (profileMap[c.author_id] ?? null) : null,
+  }));
+}
+
 // ─── Posts ────────────────────────────────────────────────────
 router.get('/posts', [
   ...paginationV,
@@ -40,7 +81,7 @@ router.get('/posts', [
 
     let q = supabaseAdmin
       .from('posts')
-      .select('*, author:user_profiles!posts_author_id_fkey(id, display_name, email, avatar_url)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -52,26 +93,30 @@ router.get('/posts', [
 
     if (search) q = q.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
 
-    const { data, count, error } = await q;
+    const { data: rawPosts, count, error } = await q;
     if (error) throw error;
 
+    // Manual author enrichment (no direct FK between posts and user_profiles)
+    const posts = await enrichPostsWithAuthors(rawPosts ?? []);
+
     // Attach likes & comment counts
-    const postIds = (data ?? []).map(p => p.id);
-    const [{ data: likeCounts }, { data: commentCounts }] = await Promise.all([
-      supabaseAdmin.from('post_likes').select('post_id').in('post_id', postIds),
-      supabaseAdmin.from('comments').select('post_id').in('post_id', postIds),
-    ]);
+    const postIds = posts.map(p => p.id);
+    if (postIds.length > 0) {
+      const [{ data: likeCounts }, { data: commentCounts }] = await Promise.all([
+        supabaseAdmin.from('post_likes').select('post_id').in('post_id', postIds),
+        supabaseAdmin.from('comments').select('post_id').in('post_id', postIds),
+      ]);
 
-    const likeMap    = {};
-    const commentMap = {};
-    for (const l of (likeCounts ?? []))    likeMap[l.post_id]    = (likeMap[l.post_id]    || 0) + 1;
-    for (const c of (commentCounts ?? [])) commentMap[c.post_id] = (commentMap[c.post_id] || 0) + 1;
+      const likeMap    = {};
+      const commentMap = {};
+      for (const l of (likeCounts    ?? [])) likeMap[l.post_id]    = (likeMap[l.post_id]    || 0) + 1;
+      for (const c of (commentCounts ?? [])) commentMap[c.post_id] = (commentMap[c.post_id] || 0) + 1;
 
-    const posts = (data ?? []).map(p => ({
-      ...p,
-      likes_count:   likeMap[p.id]    ?? p.likes_count    ?? 0,
-      comment_count: commentMap[p.id] ?? 0,
-    }));
+      posts.forEach(p => {
+        p.likes_count   = likeMap[p.id]    ?? p.likes_count    ?? 0;
+        p.comment_count = commentMap[p.id] ?? 0;
+      });
+    }
 
     return success(res, { posts, pagination: { total: count, limit, offset, returned: posts.length } });
   } catch (error) { next(error); }
@@ -79,20 +124,21 @@ router.get('/posts', [
 
 router.get('/posts/:id', uuidParam, validate, async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin
+    const { data: post, error } = await supabaseAdmin
       .from('posts')
-      .select('*, author:user_profiles!posts_author_id_fkey(id, display_name, email, avatar_url)')
+      .select('*')
       .eq('id', req.params.id)
       .maybeSingle();
     if (error) throw error;
-    if (!data) throw new NotFoundError('Post not found');
+    if (!post) throw new NotFoundError('Post not found');
 
-    const [{ count: commentCount }, { count: likeCount }] = await Promise.all([
+    const [enriched, { count: commentCount }, { count: likeCount }] = await Promise.all([
+      enrichPostsWithAuthors([post]),
       supabaseAdmin.from('comments').select('*', { count: 'exact', head: true }).eq('post_id', req.params.id),
       supabaseAdmin.from('post_likes').select('*', { count: 'exact', head: true }).eq('post_id', req.params.id),
     ]);
 
-    return success(res, { post: { ...data, commentCount, likeCount } });
+    return success(res, { post: { ...enriched[0], commentCount, likeCount } });
   } catch (error) { next(error); }
 });
 
@@ -104,13 +150,14 @@ router.post('/posts', [
 ], validate, async (req, res, next) => {
   try {
     const { title, content, category, image_url } = req.body;
-    const { data, error } = await supabaseAdmin
+    const { data: post, error } = await supabaseAdmin
       .from('posts')
       .insert({ title, content, category, image_url: image_url || null, author_id: req.user.id })
-      .select('*, author:user_profiles!posts_author_id_fkey(id, display_name, email, avatar_url)')
+      .select()
       .single();
     if (error) throw error;
-    return success(res, { message: 'Post created successfully', post: data }, 201);
+    const [enriched] = await enrichPostsWithAuthors([post]);
+    return success(res, { message: 'Post created successfully', post: enriched }, 201);
   } catch (error) { next(error); }
 });
 
@@ -127,12 +174,12 @@ router.patch('/posts/:id', [...uuidParam,
     for (const f of allowed) if (req.body[f] !== undefined) updates[f] = req.body[f];
     if (!Object.keys(updates).length) throw new AppError('No fields to update', 400, 'NO_FIELDS');
 
-    const { data, error } = await supabaseAdmin.from('posts').update(updates).eq('id', req.params.id)
-      .select('*, author:user_profiles!posts_author_id_fkey(id, display_name, email, avatar_url)')
-      .maybeSingle();
+    const { data: post, error } = await supabaseAdmin
+      .from('posts').update(updates).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
-    if (!data) throw new NotFoundError('Post not found');
-    return success(res, { message: 'Post updated', post: data });
+    if (!post) throw new NotFoundError('Post not found');
+    const [enriched] = await enrichPostsWithAuthors([post]);
+    return success(res, { message: 'Post updated', post: enriched });
   } catch (error) { next(error); }
 });
 
@@ -151,15 +198,16 @@ router.get('/posts/:id/comments', [...uuidParam, ...paginationV], validate, asyn
     const limit  = req.query.limit  ?? 50;
     const offset = req.query.offset ?? 0;
 
-    const { data, count, error } = await supabaseAdmin
+    const { data: rawComments, count, error } = await supabaseAdmin
       .from('comments')
-      .select('*, author:user_profiles!comments_author_id_fkey(id, display_name, email, avatar_url)', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .eq('post_id', req.params.id)
       .order('created_at', { ascending: true })
       .range(offset, offset + limit - 1);
-
     if (error) throw error;
-    return success(res, { comments: data, pagination: { total: count, limit, offset } });
+
+    const comments = await enrichCommentsWithAuthors(rawComments ?? []);
+    return success(res, { comments, pagination: { total: count, limit, offset } });
   } catch (error) { next(error); }
 });
 
@@ -174,12 +222,11 @@ router.delete('/comments/:id', uuidParam, validate, async (req, res, next) => {
 
 router.patch('/comments/:id/flag', uuidParam, validate, async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin.from('comments').update({ is_flagged: true }).eq('id', req.params.id)
-      .select('*, author:user_profiles!comments_author_id_fkey(id, display_name, email)')
-      .maybeSingle();
+    const { data, error } = await supabaseAdmin.from('comments').update({ is_flagged: true }).eq('id', req.params.id).select().maybeSingle();
     if (error) throw error;
     if (!data) throw new NotFoundError('Comment not found');
-    return success(res, { message: 'Comment flagged', comment: data });
+    const [enriched] = await enrichCommentsWithAuthors([data]);
+    return success(res, { message: 'Comment flagged', comment: enriched });
   } catch (error) { next(error); }
 });
 
@@ -201,12 +248,8 @@ router.get('/analytics', [
     const since = new Date(Date.now() - days * 86400000).toISOString();
 
     const [
-      postsResult,
-      commentsResult,
-      usersResult,
-      flaggedPostsResult,
-      flaggedCommentsResult,
-      likesResult,
+      postsResult, commentsResult, usersResult,
+      flaggedPostsResult, flaggedCommentsResult, likesResult,
     ] = await Promise.all([
       supabaseAdmin.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', since),
       supabaseAdmin.from('comments').select('*', { count: 'exact', head: true }).gte('created_at', since),
@@ -216,7 +259,6 @@ router.get('/analytics', [
       supabaseAdmin.from('post_likes').select('*', { count: 'exact', head: true }).gte('created_at', since),
     ]);
 
-    // Weekly activity (last 7 days)
     const weeklyActivity = [];
     for (let i = 6; i >= 0; i--) {
       const dayStart = new Date(Date.now() - i * 86400000);
@@ -237,12 +279,12 @@ router.get('/analytics', [
     return success(res, {
       period: `${days} days`,
       stats: {
-        postsPublished:    postsResult.count   || 0,
-        comments:          commentsResult.count || 0,
-        activeUsers:       usersResult.count   || 0,
-        flaggedPosts:      flaggedPostsResult.count   || 0,
-        flaggedComments:   flaggedCommentsResult.count || 0,
-        totalLikes:        likesResult.count   || 0,
+        postsPublished:  postsResult.count          || 0,
+        comments:        commentsResult.count        || 0,
+        activeUsers:     usersResult.count           || 0,
+        flaggedPosts:    flaggedPostsResult.count    || 0,
+        flaggedComments: flaggedCommentsResult.count || 0,
+        totalLikes:      likesResult.count           || 0,
       },
       weeklyActivity,
     });

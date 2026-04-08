@@ -8,12 +8,6 @@ import { success } from '../utils/response.js';
 
 const router = express.Router();
 router.use(authenticateUser);
-
-// ─── Helpers ──────────────────────────────────────────────────
-/**
- * Compute next predicted period start based on user's avg cycle length
- * and their most recent period log.
- */
 function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5) {
   const start = new Date(lastStart);
   const predictedStart = new Date(start);
@@ -22,7 +16,7 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
   const predictedEnd = new Date(predictedStart);
   predictedEnd.setDate(predictedStart.getDate() + periodLengthAvg - 1);
 
-  // Ovulation ~14 days before next period
+  
   const ovulation = new Date(predictedStart);
   ovulation.setDate(predictedStart.getDate() - 14);
 
@@ -41,7 +35,7 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
 }
 
 async function refreshPredictions(userId) {
-  // Get profile for avg cycle/period lengths
+  
   const { data: profile } = await supabase
     .from('user_profiles')
     .select('cycle_length_avg, period_length_avg')
@@ -51,7 +45,7 @@ async function refreshPredictions(userId) {
   const cycleLengthAvg  = profile?.cycle_length_avg  ?? 28;
   const periodLengthAvg = profile?.period_length_avg ?? 5;
 
-  // Get the most recent period log
+  
   const { data: lastLog } = await supabase
     .from('period_logs')
     .select('start_date')
@@ -64,14 +58,14 @@ async function refreshPredictions(userId) {
 
   const pred = computePredictions(lastLog.start_date, cycleLengthAvg, periodLengthAvg);
 
-  // Invalidate old "current" predictions
+  
   await supabase
     .from('cycle_predictions')
     .update({ is_current: false })
     .eq('user_id', userId)
     .eq('is_current', true);
 
-  // Insert new prediction
+  
   const { data } = await supabase
     .from('cycle_predictions')
     .insert({ user_id: userId, ...pred, is_current: true })
@@ -81,7 +75,7 @@ async function refreshPredictions(userId) {
   return data;
 }
 
-// ─── First log ────────────────────────────────────────────────
+
 router.post('/first-log', periodValidators.logCreate, validate, async (req, res, next) => {
   try {
     const { startDate, notes } = req.body;
@@ -103,14 +97,14 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
       .single();
     if (error) throw error;
 
-    // Seed initial prediction
+    
     await refreshPredictions(userId).catch(() => {});
 
     return success(res, { message: 'First period logged successfully', periodLog: data }, 201);
   } catch (error) { next(error); }
 });
 
-// ─── Log new period ──────────────────────────────────────────
+
 router.post('/log', periodValidators.logCreate, validate, async (req, res, next) => {
   try {
     const { startDate, endDate, notes } = req.body;
@@ -129,14 +123,14 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
       .single();
     if (error) throw error;
 
-    // Recompute predictions based on new log
+    
     await refreshPredictions(userId).catch(() => {});
 
     return success(res, { message: 'Period logged successfully', periodLog: data }, 201);
   } catch (error) { next(error); }
 });
 
-// ─── List logs ────────────────────────────────────────────────
+
 router.get('/logs', periodValidators.pagination, validate, async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -155,7 +149,7 @@ router.get('/logs', periodValidators.pagination, validate, async (req, res, next
   } catch (error) { next(error); }
 });
 
-// ─── Update log ───────────────────────────────────────────────
+
 router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -186,7 +180,7 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
   } catch (error) { next(error); }
 });
 
-// ─── Delete log ───────────────────────────────────────────────
+
 router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res, next) => {
   try {
     const { id }    = req.params;
@@ -208,10 +202,9 @@ router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res,
   } catch (error) { next(error); }
 });
 
-// ─── Log symptoms ─────────────────────────────────────────────
 router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res, next) => {
   try {
-    const { loggedDate, logId, symptoms, flowLevel, mood, painLevel, notes } = req.body;
+    const { loggedDate, logId, symptoms, flowLevel, discharge, mood, painLevel, notes } = req.body;
     const userId = req.user.id;
 
     const { data, error } = await supabase
@@ -222,6 +215,7 @@ router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res,
         logged_date: loggedDate ?? new Date().toISOString().split('T')[0],
         symptoms:    symptoms  ?? [],
         flow_level:  flowLevel ?? null,
+        discharge:   discharge ?? null,
         mood:        mood      ?? [],
         pain_level:  painLevel ?? null,
         notes:       notes     ?? null,
@@ -234,7 +228,7 @@ router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res,
   } catch (error) { next(error); }
 });
 
-// ─── List symptoms ────────────────────────────────────────────
+
 router.get('/symptoms', periodValidators.pagination, validate, async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -253,7 +247,7 @@ router.get('/symptoms', periodValidators.pagination, validate, async (req, res, 
   } catch (error) { next(error); }
 });
 
-// ─── Get current cycle prediction ─────────────────────────────
+
 router.get('/prediction', async (req, res, next) => {
   try {
     const userId = req.user.id;
@@ -269,7 +263,7 @@ router.get('/prediction', async (req, res, next) => {
     if (error) throw error;
 
     if (!prediction) {
-      // Try to compute on-the-fly if no prediction exists
+      
       const computed = await refreshPredictions(userId);
       return success(res, { prediction: computed ?? null });
     }
@@ -278,20 +272,20 @@ router.get('/prediction', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── Get cycle summary / dashboard data ──────────────────────
+
 router.get('/summary', async (req, res, next) => {
   try {
     const userId = req.user.id;
     const today  = new Date().toISOString().split('T')[0];
 
-    // Profile for personalisation
+  
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('display_name, personality_type, motivation_style, health_focus, hormonal_status, cycle_length_avg, period_length_avg')
       .eq('id', userId)
       .maybeSingle();
 
-    // Current prediction
+   
     const { data: prediction } = await supabase
       .from('cycle_predictions')
       .select('*')
@@ -301,7 +295,7 @@ router.get('/summary', async (req, res, next) => {
       .limit(1)
       .maybeSingle();
 
-    // Most recent period log
+  
     const { data: lastLog } = await supabase
       .from('period_logs')
       .select('*')
@@ -310,7 +304,7 @@ router.get('/summary', async (req, res, next) => {
       .limit(1)
       .maybeSingle();
 
-    // Today's symptoms if any
+  
     const { data: todaySymptoms } = await supabase
       .from('period_symptoms')
       .select('*')
@@ -318,7 +312,7 @@ router.get('/summary', async (req, res, next) => {
       .eq('logged_date', today)
       .maybeSingle();
 
-    // Determine current cycle phase
+  
     let cyclePhase = 'unknown';
     let daysUntilPeriod = null;
 
@@ -348,7 +342,7 @@ router.get('/summary', async (req, res, next) => {
       }
     }
 
-    // Personality-driven tip
+   
     const tips = {
       cycle_sharer:      'Share how you\'re feeling in the community today 💜',
       health_optimizer:  'Track today\'s symptoms for better cycle insights 📊',
@@ -380,3 +374,109 @@ router.get('/summary', async (req, res, next) => {
 });
 
 export default router;
+
+
+router.get('/insights', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    
+    const { data: logs, error: logsError } = await supabase
+      .from('period_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('start_date', { ascending: true });
+    if (logsError) throw logsError;
+
+    if (!logs || logs.length === 0) {
+      return success(res, {
+        insights: {
+          cyclesTracked: 0,
+          longestCycle: null,
+          shortestCycle: null,
+          averageCycleLength: null,
+          cycleHistory: [],
+          frequentSymptoms: [],
+          tip: 'Log your first period to start seeing cycle insights.',
+        },
+      });
+    }
+
+    
+    const cycleHistory = [];
+    let longestCycle = 0;
+    let shortestCycle = Infinity;
+    let totalLength = 0;
+
+    for (let i = 1; i < logs.length; i++) {
+      const prev = new Date(logs[i - 1].start_date);
+      const curr = new Date(logs[i].start_date);
+      const length = Math.round((curr - prev) / 86400000);
+      if (length > 0 && length < 120) { // sanity check
+        cycleHistory.push({ label: `Cycle ${i}`, days: length, startDate: logs[i-1].start_date });
+        if (length > longestCycle)  longestCycle  = length;
+        if (length < shortestCycle) shortestCycle = length;
+        totalLength += length;
+      }
+    }
+
+    const cyclesTracked = cycleHistory.length;
+    const averageCycleLength = cyclesTracked > 0 ? Math.round(totalLength / cyclesTracked) : null;
+
+   
+    const { data: allSymptoms } = await supabase
+      .from('period_symptoms')
+      .select('symptoms, discharge, flow_level')
+      .eq('user_id', userId);
+
+    const symptomFreq = {};
+    for (const s of (allSymptoms ?? [])) {
+      for (const sym of (s.symptoms ?? [])) {
+        symptomFreq[sym] = (symptomFreq[sym] || 0) + 1;
+      }
+    }
+    const frequentSymptoms = Object.entries(symptomFreq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }));
+
+    
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const recentLogs = logs.filter(l => new Date(l.start_date) >= threeMonthsAgo);
+  
+    const { data: prediction } = await supabase
+      .from('cycle_predictions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_current', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+   
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('personality_type, cycle_length_avg')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const cycleRange = cyclesTracked > 1
+      ? `${shortestCycle}–${longestCycle} days`
+      : null;
+
+    return success(res, {
+      insights: {
+        cyclesTracked,
+        longestCycle:        longestCycle   || null,
+        shortestCycle:       shortestCycle === Infinity ? null : shortestCycle,
+        averageCycleLength,
+        cycleRange,
+        cycleHistory,         // for bar chart
+        recentLogs,           // for calendar view
+        prediction,           // current cycle prediction overlay
+        frequentSymptoms,
+      },
+    });
+  } catch (error) { next(error); }
+});

@@ -14,7 +14,7 @@ import { param } from 'express-validator';
 const router = express.Router();
 router.use(authenticateUser);
 
-// ─── List notifications ───────────────────────────────────────
+
 router.get('/', notificationValidators.pagination, validate, async (req, res, next) => {
   try {
     const userId     = req.user.id;
@@ -48,7 +48,7 @@ router.get('/', notificationValidators.pagination, validate, async (req, res, ne
   } catch (error) { next(error); }
 });
 
-// ─── Mark a notification as read ─────────────────────────────
+
 router.patch('/:id/read', [param('id').isUUID()], validate, async (req, res, next) => {
   try {
     const { data, error } = await supabase
@@ -64,7 +64,7 @@ router.patch('/:id/read', [param('id').isUUID()], validate, async (req, res, nex
   } catch (error) { next(error); }
 });
 
-// ─── Mark all as read ─────────────────────────────────────────
+
 router.patch('/read-all', async (req, res, next) => {
   try {
     const { error } = await supabase
@@ -77,7 +77,7 @@ router.patch('/read-all', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── Delete a notification ────────────────────────────────────
+
 router.delete('/:id', [param('id').isUUID()], validate, async (req, res, next) => {
   try {
     const { data, error } = await supabase

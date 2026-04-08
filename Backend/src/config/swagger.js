@@ -97,7 +97,8 @@ export const swaggerSpec = {
           log_id:      { type: 'string', format: 'uuid', nullable: true },
           logged_date: { type: 'string', format: 'date' },
           symptoms:    { type: 'array', items: { type: 'string' } },
-          flow_level:  { type: 'string', nullable: true },
+          flow_level:  { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'], nullable: true },
+          discharge:   { type: 'string', enum: ['dry','sticky','creamy','egg_white'], nullable: true },
           mood:        { type: 'array', items: { type: 'string' } },
           pain_level:  { type: 'integer', nullable: true },
           notes:       { type: 'string', nullable: true },
@@ -689,6 +690,29 @@ export const swaggerSpec = {
           404: { $ref: '#/components/responses/NotFound' },
         },
       },
+
+      delete: {
+        tags: ['Period Tracking'],
+        summary: 'Delete a period log',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Period log deleted' },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+      delete: {
+        tags: ['Period Tracking'],
+        summary: 'Delete a period log',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Period log deleted' },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
     },
 
     // ── ADMIN ─────────────────────────────────────────────────────────────────
@@ -886,6 +910,38 @@ export const swaggerSpec = {
       },
     },
 
+
+    '/admin/posts-create': {
+      post: {
+        tags: ['Admin Community'],
+        summary: 'Create a community post (admin)',
+        description: 'Admin creates a post that appears in the community feed.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'content', 'category'],
+                properties: {
+                  title:     { type: 'string', maxLength: 200, example: 'Tips for managing PCOS naturally' },
+                  content:   { type: 'string', example: 'Here are some evidence-based approaches...' },
+                  category:  { type: 'string', enum: ['community','lifestyle_tips','discord'], example: 'lifestyle_tips' },
+                  image_url: { type: 'string', format: 'uri', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Post created', content: { 'application/json': { schema: { type: 'object', properties: { post: { $ref: '#/components/schemas/Post' } } } } } },
+          400: { $ref: '#/components/responses/ValidationError' },
+          403: { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+
     '/admin/posts/{id}': {
       get: {
         tags: ['Admin'],
@@ -929,6 +985,20 @@ export const swaggerSpec = {
           401: { $ref: '#/components/responses/Unauthorized' },
           403: { $ref: '#/components/responses/Forbidden' },
           404: { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+
+    '/admin/posts-delete/{id}': {
+      delete: {
+        tags: ['Admin Community'],
+        summary: 'Delete a post by ID',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Post deleted' },
+          404: { $ref: '#/components/responses/NotFound' },
+          403: { $ref: '#/components/responses/Forbidden' },
         },
       },
     },
@@ -1032,6 +1102,49 @@ export const swaggerSpec = {
     },
 
     // ── PERSONALITY (ONBOARDING) ─────────────────────────────────────────────
+    '/onboarding/cycle-info': {
+      post: {
+        tags: ['Onboarding'],
+        summary: 'Save last period date and cycle/period length estimates',
+        description: 'Screens 6-8 in Figma. Saves the last period start date (seeds the first period log), how long the period usually lasts, and how long the cycle usually is. Used to compute the first cycle prediction.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['lastPeriodDate'],
+                properties: {
+                  lastPeriodDate: {
+                    type: 'string', format: 'date', example: '2026-03-15',
+                    description: 'Start date of the most recent period',
+                  },
+                  periodLengthRange: {
+                    type: 'string',
+                    enum: ['1_2', '3_5', '6_8', '9_plus'],
+                    example: '3_5',
+                    description: 'How long the period usually lasts. Maps to Figma options: 1_2 = 1-2 days, 3_5 = 3-5 days, 6_8 = 6-8 days, 9_plus = More than 9 days',
+                  },
+                  cycleLengthRange: {
+                    type: 'string',
+                    enum: ['lt_21', '21_35', '36_60', 'gt_60'],
+                    example: '21_35',
+                    description: 'How long the cycle usually lasts. Maps to Figma options: lt_21 = Less than 21 days, 21_35 = 21-35 days, 36_60 = 36-60 days, gt_60 = More than 60 days',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Cycle info saved and first period log seeded' },
+          400: { $ref: '#/components/responses/ValidationError' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
     '/onboarding/personality': {
       post: {
         tags: ['Onboarding'],
@@ -1114,6 +1227,44 @@ export const swaggerSpec = {
     },
 
     // ── CYCLE PREDICTION ──────────────────────────────────────────────────────
+    '/period/insights': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'Cycle insights and analytics (Screen 4 — Insights Dashboard)',
+        description: 'Returns cycles tracked, longest/shortest cycle, average cycle length, bar chart history data, frequent symptoms, and recent logs for the calendar view.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Cycle insights',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    insights: {
+                      type: 'object',
+                      properties: {
+                        cyclesTracked:       { type: 'integer' },
+                        longestCycle:        { type: 'integer', nullable: true },
+                        shortestCycle:       { type: 'integer', nullable: true },
+                        averageCycleLength:  { type: 'integer', nullable: true },
+                        cycleRange:          { type: 'string', nullable: true, example: '28–35 days' },
+                        cycleHistory:        { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, days: { type: 'integer' }, startDate: { type: 'string' } } } },
+                        recentLogs:          { type: 'array', items: { $ref: '#/components/schemas/PeriodLog' } },
+                        prediction:          { $ref: '#/components/schemas/CyclePrediction' },
+                        frequentSymptoms:    { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, count: { type: 'integer' } } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
     '/period/prediction': {
       get: {
         tags: ['Period Tracking'],
@@ -1360,6 +1511,101 @@ export const swaggerSpec = {
         responses: {
           200: { description: 'Public profile with postsCount' },
           404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/profile/change-password': {
+      post: {
+        tags: ['Profile'],
+        summary: 'Change password (authenticated user)',
+        description: 'Screen 4 Figma — "Create new password" from Edit Profile. Verifies the current password before updating. For security, the user should log in again after this.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['currentPassword', 'newPassword', 'confirmPassword'],
+                properties: {
+                  currentPassword:  { type: 'string', example: 'OldPass123', description: 'Current password for verification' },
+                  newPassword:      { type: 'string', minLength: 8, example: 'NewPass456' },
+                  confirmPassword:  { type: 'string', example: 'NewPass456' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Password changed successfully' },
+          400: { description: 'Current password incorrect or passwords do not match' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/profile/account': {
+      delete: {
+        tags: ['Profile'],
+        summary: 'Delete own account and all data',
+        description: 'Screen 4 Figma — "Delete my account and data" with confirmation modal. Requires password confirmation. Permanently deletes the user and all associated data via CASCADE.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['password'],
+                properties: {
+                  password: { type: 'string', description: 'Current password to confirm deletion' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Account and all data permanently deleted' },
+          400: { description: 'Incorrect password' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/profile/export-data': {
+      get: {
+        tags: ['Profile'],
+        summary: 'Export all user data (GDPR)',
+        description: 'Screen 4 Figma — "Export Data" button. Returns all stored data for the user including period logs, symptoms, predictions, posts, comments and notifications.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Full user data export',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    exportedAt: { type: 'string', format: 'date-time' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        profile:       { $ref: '#/components/schemas/UserProfile' },
+                        periodLogs:    { type: 'array', items: { $ref: '#/components/schemas/PeriodLog' } },
+                        symptoms:      { type: 'array', items: { $ref: '#/components/schemas/SymptomLog' } },
+                        predictions:   { type: 'array', items: { $ref: '#/components/schemas/CyclePrediction' } },
+                        posts:         { type: 'array' },
+                        comments:      { type: 'array' },
+                        notifications: { type: 'array' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
       },

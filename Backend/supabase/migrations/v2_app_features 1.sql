@@ -1,11 +1,4 @@
--- ================================================================
--- UteriFlow v2 — App Feature Schema
--- Adds: personality, symptoms, cycle_predictions, notifications,
---       post_likes, post_bookmarks, user_bookmarks
--- Safe to run multiple times (uses IF NOT EXISTS)
--- ================================================================
 
--- ── 1. Add personality columns to user_profiles ───────────────
 ALTER TABLE user_profiles
   ADD COLUMN IF NOT EXISTS personality_type     text CHECK (personality_type IN ('cycle_sharer','health_optimizer','silent_tracker','community_seeker')),
   ADD COLUMN IF NOT EXISTS motivation_style     text CHECK (motivation_style IN ('gentle_reminders','data_driven','community_support','minimal_nudges')),
@@ -15,7 +8,7 @@ ALTER TABLE user_profiles
   ADD COLUMN IF NOT EXISTS cycle_length_avg     integer DEFAULT 28,
   ADD COLUMN IF NOT EXISTS period_length_avg    integer DEFAULT 5;
 
--- ── 2. period_symptoms ─────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS period_symptoms (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -43,7 +36,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- ── 3. cycle_predictions ───────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS cycle_predictions (
   id                    uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id               uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -65,7 +58,7 @@ CREATE POLICY "Users view own predictions"
 
 CREATE INDEX IF NOT EXISTS idx_predictions_user ON cycle_predictions(user_id);
 
--- ── 4. notifications ───────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS notifications (
   id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -89,7 +82,7 @@ CREATE POLICY "Users manage own notifications"
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read) WHERE is_read = false;
 
--- ── 5. post_likes ──────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS post_likes (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id    uuid        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -106,7 +99,7 @@ CREATE POLICY "Users manage own likes"
 CREATE INDEX IF NOT EXISTS idx_post_likes_post   ON post_likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_post_likes_user   ON post_likes(user_id);
 
--- ── 6. comment_likes ───────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS comment_likes (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   comment_id uuid        NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
@@ -120,7 +113,7 @@ DROP POLICY IF EXISTS "Users manage own comment likes" ON comment_likes;
 CREATE POLICY "Users manage own comment likes"
   ON comment_likes FOR ALL TO authenticated USING (auth.uid() = user_id);
 
--- ── 7. post_bookmarks ──────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS post_bookmarks (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id    uuid        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -136,12 +129,12 @@ CREATE POLICY "Users manage own bookmarks"
 
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON post_bookmarks(user_id);
 
--- ── 8. Indexes ─────────────────────────────────────────────────
+
 CREATE INDEX IF NOT EXISTS idx_symptoms_user    ON period_symptoms(user_id);
 CREATE INDEX IF NOT EXISTS idx_symptoms_date    ON period_symptoms(user_id, logged_date);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 
--- ── Verification ───────────────────────────────────────────────
+
 SELECT tablename FROM pg_tables
 WHERE schemaname = 'public'
   AND tablename IN (

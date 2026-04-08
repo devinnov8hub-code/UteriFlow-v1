@@ -15,7 +15,7 @@ const paginationValidators = [
 ];
 const uuidParam = [param('id').isUUID().withMessage('Invalid ID')];
 
-// ─── Stats overview ──────────────────────────────────────────
+
 router.get('/stats', async (req, res, next) => {
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -72,7 +72,6 @@ router.get('/stats', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── List users ───────────────────────────────────────────────
 router.get('/users', [
   ...paginationValidators,
   query('search').optional().trim().isLength({ max: 100 }),
@@ -96,7 +95,7 @@ router.get('/users', [
     const { data, count, error } = await q;
     if (error) throw error;
 
-    // Enrich with ban status
+    
     const userIds = (data ?? []).map(u => u.id);
     const { data: bans } = await supabaseAdmin
       .from('user_bans')
@@ -115,7 +114,7 @@ router.get('/users', [
   } catch (error) { next(error); }
 });
 
-// ─── Get single user ──────────────────────────────────────────
+
 router.get('/users/:id', uuidParam, validate, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -141,7 +140,7 @@ router.get('/users/:id', uuidParam, validate, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── Update user profile ──────────────────────────────────────
+
 router.patch('/users/:id', [
   ...uuidParam,
   body('display_name').optional().trim().isLength({ min: 1, max: 50 }),
@@ -165,7 +164,7 @@ router.patch('/users/:id', [
   } catch (error) { next(error); }
 });
 
-// ─── Delete user ──────────────────────────────────────────────
+
 router.delete('/users/:id', uuidParam, validate, async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -180,7 +179,7 @@ router.delete('/users/:id', uuidParam, validate, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── Grant / revoke admin ─────────────────────────────────────
+
 router.post('/users/:id/grant-admin', uuidParam, validate, async (req, res, next) => {
   try {
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(req.params.id, { user_metadata: { is_admin: true } });
@@ -199,7 +198,7 @@ router.post('/users/:id/revoke-admin', uuidParam, validate, async (req, res, nex
   } catch (error) { next(error); }
 });
 
-// ─── Period logs ──────────────────────────────────────────────
+
 router.get('/period-logs', [
   ...paginationValidators,
   query('user_id').optional().isUUID().withMessage('Invalid user_id'),
@@ -233,7 +232,7 @@ router.delete('/period-logs/:id', uuidParam, validate, async (req, res, next) =>
   } catch (error) { next(error); }
 });
 
-// ─── User bans ────────────────────────────────────────────────
+
 router.post('/users/:id/ban', [...uuidParam,
   body('ban_type').isIn(['temporary','permanent']).withMessage('ban_type must be temporary or permanent'),
   body('reason').optional().trim().isLength({ max: 500 }),
@@ -246,7 +245,7 @@ router.post('/users/:id/ban', [...uuidParam,
     const { data: profile } = await supabaseAdmin.from('user_profiles').select('id,email').eq('id', id).maybeSingle();
     if (!profile) throw new NotFoundError('User not found');
 
-    // Remove any existing ban first
+    
     await supabaseAdmin.from('user_bans').delete().eq('user_id', id);
 
     const banned_until = ban_type === 'temporary' && days
@@ -274,7 +273,7 @@ router.delete('/users/:id/ban', uuidParam, validate, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// ─── Notifications (admin create) ─────────────────────────────
+
 router.post('/notifications/broadcast', [
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('body').trim().notEmpty().withMessage('Body is required'),
@@ -286,7 +285,7 @@ router.post('/notifications/broadcast', [
 
     let targets = userIds;
     if (!targets || targets.length === 0) {
-      // Broadcast to all users
+     
       const { data: profiles } = await supabaseAdmin.from('user_profiles').select('id');
       targets = (profiles ?? []).map(p => p.id);
     }

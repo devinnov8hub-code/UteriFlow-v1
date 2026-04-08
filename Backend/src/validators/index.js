@@ -56,6 +56,20 @@ export const onboardingValidators = {
       'fertility', 'hair_issues', 'fatigue', 'other',
     ]).withMessage('One or more invalid health focus values'),
   ],
+  // NEW — cycle info step (last period date + length estimates, Figma screens 6-8)
+  cycleInfo: [
+    body('lastPeriodDate').isISO8601().toDate().withMessage('lastPeriodDate must be a valid date'),
+    // Figma: "How long does your period usually last?" — 1-2 days | 3-5 days | 6-8 days | More than 9 days
+    body('periodLengthRange')
+      .optional()
+      .isIn(['1_2', '3_5', '6_8', '9_plus'])
+      .withMessage('Invalid period length. Use: 1_2, 3_5, 6_8, or 9_plus'),
+    // Figma: "How long was your last cycle?" — Less than 21 | 21-35 days | 36-60 days | More than 60 days
+    body('cycleLengthRange')
+      .optional()
+      .isIn(['lt_21', '21_35', '36_60', 'gt_60'])
+      .withMessage('Invalid cycle length. Use: lt_21, 21_35, 36_60, or gt_60'),
+  ],
   personality: [
     body('personalityType')
       .isIn(['cycle_sharer', 'health_optimizer', 'silent_tracker', 'community_seeker'])
@@ -93,16 +107,22 @@ export const periodValidators = {
     body('logId').optional({ nullable: true }).isUUID().withMessage('logId must be a valid UUID'),
     body('symptoms').isArray().withMessage('symptoms must be an array'),
     body('symptoms.*').isIn([
+      // Physical symptoms (Screen 3)
       'cramps', 'bloating', 'headache', 'backache', 'nausea',
       'fatigue', 'breast_tenderness', 'acne', 'mood_swings',
-      'spotting', 'insomnia', 'food_cravings', 'hot_flashes', 'other',
+      'spotting', 'insomnia', 'food_cravings', 'hot_flashes',
+      'fever', 'weight_gain', 'migraines', 'other',
     ]).withMessage('One or more invalid symptom values'),
     body('flowLevel').optional({ nullable: true })
       .isIn(['spotting', 'light', 'medium', 'heavy', 'very_heavy']).withMessage('Invalid flow level'),
+    // Discharge field (Screen 3 — "Observe your fluid to identify your most fertile days")
+    body('discharge').optional({ nullable: true })
+      .isIn(['dry', 'sticky', 'creamy', 'egg_white']).withMessage('Invalid discharge type'),
     body('mood').optional().isArray().withMessage('mood must be an array'),
     body('mood.*').isIn(['happy', 'sad', 'anxious', 'irritable', 'calm', 'energetic', 'depressed', 'emotional'])
       .withMessage('One or more invalid mood values'),
-    body('painLevel').optional({ nullable: true }).isInt({ min: 1, max: 10 }).withMessage('Pain level must be between 1 and 10'),
+    // Pelvic pain mapped to pain_level (Screen 3 — none/mild/moderate/severe → 0/3/6/9)
+    body('painLevel').optional({ nullable: true }).isInt({ min: 0, max: 10 }).withMessage('Pain level must be between 0 and 10'),
     body('notes').optional({ nullable: true }).trim().isLength({ max: 1000 }),
   ],
 };

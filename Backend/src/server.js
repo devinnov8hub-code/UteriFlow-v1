@@ -19,7 +19,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Trust Vercel's reverse proxy — required for express-rate-limit
+
 app.set('trust proxy', 1);
 
 app.use(helmet({
@@ -67,7 +67,7 @@ app.use((req, res, next) => {
 app.get('/',       (req, res) => res.json({ name: 'UteriFlow API', version: '2.0.0', documentation: '/api-docs', health: '/health' }));
 app.get('/health', (req, res) => res.json({ status: 'healthy', timestamp: new Date().toISOString(), env: NODE_ENV }));
 
-// ─── Swagger ──────────────────────────────────────────────────
+
 app.get('/api-docs/swagger.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.send(swaggerSpec);
@@ -103,7 +103,7 @@ app.get('/api-docs', (req, res) => {
 </html>`);
 });
 
-// ─── Routes ───────────────────────────────────────────────────
+
 app.use('/api/v1/auth',          authLimiter, authRoutes);
 app.use('/api/v1/onboarding',    onboardingRoutes);
 app.use('/api/v1/period',        periodRoutes);
@@ -113,10 +113,10 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/admin',         adminRoutes);
 app.use('/api/v1/admin',         communityAdminRoutes);
 
-// ─── 404 ──────────────────────────────────────────────────────
+
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} not found`, code: 'NOT_FOUND' }));
 
-// ─── Error handler ────────────────────────────────────────────
+
 app.use((err, req, res, next) => {
   const errResponse = (statusCode, message, code) =>
     res.status(statusCode).json({ status: 'error', data: null, error: { message, code } });
@@ -133,7 +133,7 @@ app.use((err, req, res, next) => {
   return errResponse(500, NODE_ENV === 'production' ? 'Internal server error.' : err.message, 'INTERNAL_ERROR');
 });
 
-// ─── Start (local dev only) ───────────────────────────────────
+
 const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
 if (!isVercel) {
   app.listen(PORT, async () => {

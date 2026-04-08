@@ -1,9 +1,4 @@
--- ================================================================
--- UteriFlow — Complete Database Schema
--- Run this in Supabase SQL Editor (safe to run multiple times)
--- ================================================================
 
--- ── Utility: updated_at trigger function ──────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -12,7 +7,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- ── 1. user_profiles ──────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS user_profiles (
   id                      uuid        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email                   text        NOT NULL,
@@ -47,7 +42,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- ── 2. email_verifications ────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS email_verifications (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   email      text        NOT NULL,
@@ -64,7 +59,7 @@ DROP POLICY IF EXISTS "Service role manages verifications" ON email_verification
 DROP POLICY IF EXISTS "Allow anon read own verification" ON email_verifications;
 DROP POLICY IF EXISTS "Allow anon insert verification" ON email_verifications;
 
--- Allow anyone to read/insert (needed for OTP flow before login)
+
 CREATE POLICY "Anyone can insert verifications"
   ON email_verifications FOR INSERT WITH CHECK (true);
 CREATE POLICY "Anyone can read verifications"
@@ -72,7 +67,7 @@ CREATE POLICY "Anyone can read verifications"
 CREATE POLICY "Anyone can update verifications"
   ON email_verifications FOR UPDATE USING (true);
 
--- ── 3. period_logs ────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS period_logs (
   id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -98,7 +93,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- ── 4. posts ──────────────────────────────────────────────────
+
 DROP TABLE IF EXISTS user_bans CASCADE;
 DROP TABLE IF EXISTS comments CASCADE;
 DROP TABLE IF EXISTS posts CASCADE;
@@ -139,7 +134,7 @@ CREATE POLICY "posts_delete"
 CREATE TRIGGER update_posts_updated_at
   BEFORE UPDATE ON posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ── 5. comments ───────────────────────────────────────────────
+
 CREATE TABLE comments (
   id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   post_id       uuid        NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -169,7 +164,7 @@ CREATE POLICY "comments_delete"
 CREATE TRIGGER update_comments_updated_at
   BEFORE UPDATE ON comments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ── 6. user_bans ──────────────────────────────────────────────
+
 CREATE TABLE user_bans (
   id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -186,7 +181,7 @@ ALTER TABLE user_bans ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "bans_all"
   ON user_bans FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
--- ── Indexes ───────────────────────────────────────────────────
+
 CREATE INDEX IF NOT EXISTS idx_posts_author    ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_category  ON posts(category);
 CREATE INDEX IF NOT EXISTS idx_posts_flagged   ON posts(is_flagged) WHERE is_flagged = true;
@@ -194,7 +189,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_post   ON comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_id);
 CREATE INDEX IF NOT EXISTS idx_bans_user       ON user_bans(user_id);
 
--- ── Verification ──────────────────────────────────────────────
+
 SELECT tablename, rowsecurity
 FROM pg_tables
 WHERE schemaname = 'public'
