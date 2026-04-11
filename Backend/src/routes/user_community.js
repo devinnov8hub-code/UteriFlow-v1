@@ -3,11 +3,12 @@
  * Mounted at /api/v1/community
  */
 import express from 'express';
+import { body } from 'express-validator';
 import supabase from '../config/supabase.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { communityValidators } from '../validators/index.js';
-import { NotFoundError } from '../errors/index.js';
+import { NotFoundError, AppError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 
 const router = express.Router();
@@ -15,38 +16,43 @@ router.use(authenticateUser);
 
 const { pagination, uuidParam, createComment, reportPost } = communityValidators;
 
-// ─── Helper: manually enrich posts with author from user_profiles ─
-// posts.author_id → auth.users(id), user_profiles.id → auth.users(id)
-// No direct FK between posts and user_profiles exists
+// ─── Helper: enrich posts with author, likes, bookmarks, comment_count ─
 async function enrichPosts(posts, userId) {
   if (!posts || posts.length === 0) return posts;
   const authorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
+  const postIds   = posts.map(p => p.id);
 
-  const [profiles, likes, bookmarks] = await Promise.all([
+  const [profiles, likes, bookmarks, commentRows] = await Promise.all([
     authorIds.length > 0
       ? supabase.from('user_profiles').select('id, display_name, avatar_url').in('id', authorIds)
       : { data: [] },
     userId
-      ? supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', posts.map(p => p.id))
+      ? supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds)
       : { data: [] },
     userId
-      ? supabase.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', posts.map(p => p.id))
+      ? supabase.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds)
+      : { data: [] },
+    postIds.length > 0
+      ? supabase.from('comments').select('post_id').in('post_id', postIds)
       : { data: [] },
   ]);
 
   const profileMap  = {};
   const likedSet    = new Set();
   const bookmarkSet = new Set();
+  const commentMap  = {};
 
-  for (const p of (profiles.data ?? []))   profileMap[p.id]   = p;
-  for (const l of (likes.data     ?? []))   likedSet.add(l.post_id);
-  for (const b of (bookmarks.data  ?? []))  bookmarkSet.add(b.post_id);
+  for (const p of (profiles.data   ?? [])) profileMap[p.id]     = p;
+  for (const l of (likes.data      ?? [])) likedSet.add(l.post_id);
+  for (const b of (bookmarks.data  ?? [])) bookmarkSet.add(b.post_id);
+  for (const c of (commentRows.data ?? [])) commentMap[c.post_id] = (commentMap[c.post_id] || 0) + 1;
 
   return posts.map(p => ({
     ...p,
     author:        p.author_id ? (profileMap[p.author_id] ?? null) : null,
     is_liked:      likedSet.has(p.id),
     is_bookmarked: bookmarkSet.has(p.id),
+    comment_count: commentMap[p.id] ?? 0,
   }));
 }
 
@@ -112,7 +118,55 @@ router.get('/posts/:id', uuidParam, validate, async (req, res, next) => {
       .from('comments').select('*', { count: 'exact', head: true }).eq('post_id', req.params.id);
 
     const [enriched] = await enrichPosts([post], userId);
-    return success(res, { post: { ...enriched, commentCount } });
+    return success(res, { post: { ...enriched, comment_count: commentCount ?? 0 } });
+  } catch (error) { next(error); }
+});
+
+// ─── Create a post ────────────────────────────────────────────
+router.post('/posts', [
+  body('title').trim().notEmpty().withMessage('Title is required').isLength({ max: 200 }),
+  body('content').trim().notEmpty().withMessage('Content is required'),
+  body('category').optional().isIn(['community', 'lifestyle_tips', 'discord']).withMessage('Invalid category'),
+  body('image_url').optional({ nullable: true }).isURL().withMessage('image_url must be a valid URL'),
+], validate, async (req, res, next) => {
+  try {
+    const { title, content, category = 'community', image_url } = req.body;
+    const userId = req.user.id;
+
+    const { data: post, error } = await supabase
+      .from('posts')
+      .insert({
+        title,
+        content,
+        category,
+        image_url:    image_url || null,
+        author_id:    userId,
+        is_published: true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    const [enriched] = await enrichPosts([post], userId);
+    return success(res, { message: 'Post created successfully', post: enriched }, 201);
+  } catch (error) { next(error); }
+});
+
+// ─── Delete own post ──────────────────────────────────────────
+router.delete('/posts/:id', uuidParam, validate, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const { data: existing } = await supabase
+      .from('posts').select('id, author_id').eq('id', req.params.id).maybeSingle();
+
+    if (!existing) throw new NotFoundError('Post not found');
+    if (existing.author_id !== userId) throw new AppError('Not authorized to delete this post', 403, 'FORBIDDEN');
+
+    const { error } = await supabase.from('posts').delete().eq('id', req.params.id);
+    if (error) throw error;
+
+    return success(res, { message: 'Post deleted successfully' });
   } catch (error) { next(error); }
 });
 
@@ -215,12 +269,15 @@ router.get('/comments/:id/replies', uuidParam, validate, async (req, res, next) 
 });
 
 // ─── Post a comment / reply ───────────────────────────────────
+// FIX: removed .eq('is_published', true) from post lookup so comments work
+// against posts that exist regardless of published state; add it back if needed
 router.post('/posts/:id/comments', [...uuidParam, ...createComment], validate, async (req, res, next) => {
   try {
     const { content, parentId } = req.body;
     const userId = req.user.id;
 
-    const { data: post } = await supabase.from('posts').select('id').eq('id', req.params.id).eq('is_published', true).maybeSingle();
+    const { data: post } = await supabase
+      .from('posts').select('id').eq('id', req.params.id).maybeSingle();
     if (!post) throw new NotFoundError('Post not found');
 
     const { data: comment, error } = await supabase

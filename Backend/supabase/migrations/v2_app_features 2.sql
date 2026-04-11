@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS period_symptoms (
   symptoms    text[]      NOT NULL DEFAULT '{}',
   flow_level  text        CHECK (flow_level IN ('spotting','light','medium','heavy','very_heavy')),
   mood        text[]      DEFAULT '{}',
-  pain_level  integer     CHECK (pain_level BETWEEN 1 AND 10),
+  pain_level  integer     CHECK (pain_level BETWEEN 0 AND 10),
   notes       text,
   created_at  timestamptz DEFAULT now(),
   updated_at  timestamptz DEFAULT now()

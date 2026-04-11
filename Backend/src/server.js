@@ -12,6 +12,7 @@ import adminRoutes        from './routes/admin.js';
 import communityAdminRoutes from './routes/community.js';
 import userCommunityRoutes from './routes/user_community.js';
 import profileRoutes      from './routes/profile.js';
+import lifestyleRoutes    from './routes/lifestyle.js';
 import notificationRoutes from './routes/notifications.js';
 import { AppError } from './errors/index.js';
 
@@ -108,6 +109,7 @@ app.use('/api/v1/auth',          authLimiter, authRoutes);
 app.use('/api/v1/onboarding',    onboardingRoutes);
 app.use('/api/v1/period',        periodRoutes);
 app.use('/api/v1/community',     userCommunityRoutes);
+app.use('/api/v1/lifestyle',     lifestyleRoutes);
 app.use('/api/v1/profile',       profileRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/admin',         adminRoutes);

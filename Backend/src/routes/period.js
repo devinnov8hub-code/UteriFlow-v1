@@ -458,7 +458,7 @@ router.get('/insights', async (req, res, next) => {
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('personality_type, cycle_length_avg')
-      .eq('user_id', userId)
+      .eq('id', userId)
       .maybeSingle();
 
     const cycleRange = cyclesTracked > 1

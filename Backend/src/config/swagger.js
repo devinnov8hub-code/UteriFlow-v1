@@ -1230,7 +1230,7 @@ export const swaggerSpec = {
     '/period/insights': {
       get: {
         tags: ['Period Tracking'],
-        summary: 'Cycle insights and analytics (Screen 4 — Insights Dashboard)',
+        summary: 'Cycle insights and analytics (Insights Dashboard)',
         description: 'Returns cycles tracked, longest/shortest cycle, average cycle length, bar chart history data, frequent symptoms, and recent logs for the calendar view.',
         security: [{ bearerAuth: [] }],
         responses: {

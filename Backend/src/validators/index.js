@@ -107,11 +107,13 @@ export const periodValidators = {
     body('logId').optional({ nullable: true }).isUUID().withMessage('logId must be a valid UUID'),
     body('symptoms').isArray().withMessage('symptoms must be an array'),
     body('symptoms.*').isIn([
-      // Physical symptoms (Screen 3)
+      // Physical symptoms matching the UI (Screen 3)
       'cramps', 'bloating', 'headache', 'backache', 'nausea',
       'fatigue', 'breast_tenderness', 'acne', 'mood_swings',
       'spotting', 'insomnia', 'food_cravings', 'hot_flashes',
-      'fever', 'weight_gain', 'migraines', 'other',
+      'fever', 'weight_gain', 'migraines',
+      // Additional values used by the Flutter UI
+      'heavy_flow', 'pelvic_pain', 'cravings', 'other',
     ]).withMessage('One or more invalid symptom values'),
     body('flowLevel').optional({ nullable: true })
       .isIn(['spotting', 'light', 'medium', 'heavy', 'very_heavy']).withMessage('Invalid flow level'),

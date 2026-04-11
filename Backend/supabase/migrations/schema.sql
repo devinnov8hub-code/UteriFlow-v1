@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   id                      uuid        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email                   text        NOT NULL,
   display_name            text,
-  age_group               text        CHECK (age_group IN ('18-24','25-29','30-34','35-39','40-44','45+')),
+  age_group               text        CHECK (age_group IN ('15-29', '30-34', '35-39', '40-44', '45-49', '50-55')),
   hormonal_status         text        CHECK (hormonal_status IN ('diagnosed','suspected','not_sure','no')),
   period_regularity       text        CHECK (period_regularity IN ('regular','varies_week','unpredictable','not_tracked')),
   health_focus            text[]      DEFAULT '{}',
