@@ -14,7 +14,7 @@ const router = express.Router();
 router.use(authenticateUser);
 router.get('/', async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('user_profiles')
       .select('*')
       .eq('id', req.user.id)
@@ -28,10 +28,10 @@ router.get('/', async (req, res, next) => {
       { count: commentCount },
       { count: likeCount },
     ] = await Promise.all([
-      supabase.from('posts').select('*', { count: 'exact', head: true }).eq('author_id', req.user.id),
-      supabase.from('post_bookmarks').select('*', { count: 'exact', head: true }).eq('user_id', req.user.id),
-      supabase.from('comments').select('*', { count: 'exact', head: true }).eq('author_id', req.user.id),
-      supabase.from('post_likes').select('*', { count: 'exact', head: true }).eq('user_id', req.user.id),
+      req.supabase.from('posts').select('*', { count: 'exact', head: true }).eq('author_id', req.user.id),
+      req.supabase.from('post_bookmarks').select('*', { count: 'exact', head: true }).eq('user_id', req.user.id),
+      req.supabase.from('comments').select('*', { count: 'exact', head: true }).eq('author_id', req.user.id),
+      req.supabase.from('post_likes').select('*', { count: 'exact', head: true }).eq('user_id', req.user.id),
     ]);
 
     return success(res, {
@@ -68,7 +68,7 @@ router.patch('/', profileValidators.update, validate, async (req, res, next) => 
     if (Object.keys(updates).length === 0)
       return success(res, { message: 'No changes provided' });
 
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('user_profiles')
       .update(updates)
       .eq('id', req.user.id)
@@ -163,13 +163,13 @@ router.get('/export-data', async (req, res, next) => {
       { data: comments },
       { data: notifications },
     ] = await Promise.all([
-      supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
-      supabase.from('period_logs').select('*').eq('user_id', userId).order('start_date', { ascending: true }),
-      supabase.from('period_symptoms').select('*').eq('user_id', userId).order('logged_date', { ascending: true }),
-      supabase.from('cycle_predictions').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-      supabase.from('posts').select('id,title,content,category,created_at').eq('author_id', userId),
-      supabase.from('comments').select('id,content,post_id,created_at').eq('author_id', userId),
-      supabase.from('notifications').select('*').eq('user_id', userId),
+      req.supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
+      req.supabase.from('period_logs').select('*').eq('user_id', userId).order('start_date', { ascending: true }),
+      req.supabase.from('period_symptoms').select('*').eq('user_id', userId).order('logged_date', { ascending: true }),
+      req.supabase.from('cycle_predictions').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      req.supabase.from('posts').select('id,title,content,category,created_at').eq('author_id', userId),
+      req.supabase.from('comments').select('id,content,post_id,created_at').eq('author_id', userId),
+      req.supabase.from('notifications').select('*').eq('user_id', userId),
     ]);
 
     return success(res, {
@@ -188,7 +188,7 @@ router.get('/export-data', async (req, res, next) => {
 });
 router.get('/:id', async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('user_profiles')
       .select('id, display_name, avatar_url, bio, created_at')
       .eq('id', req.params.id)
@@ -196,7 +196,7 @@ router.get('/:id', async (req, res, next) => {
     if (error) throw error;
     if (!data) throw new NotFoundError('User not found');
 
-    const { count: postCount } = await supabase
+    const { count: postCount } = await req.supabase
       .from('posts')
       .select('*', { count: 'exact', head: true })
       .eq('author_id', req.params.id)

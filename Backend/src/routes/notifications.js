@@ -22,7 +22,7 @@ router.get('/', notificationValidators.pagination, validate, async (req, res, ne
     const offset     = req.query.offset     ?? 0;
     const unreadOnly = req.query.unread_only ?? false;
 
-    let q = supabase
+    let q = req.supabase
       .from('notifications')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
@@ -34,7 +34,7 @@ router.get('/', notificationValidators.pagination, validate, async (req, res, ne
     const { data, count, error } = await q;
     if (error) throw error;
 
-    const { count: unreadCount } = await supabase
+    const { count: unreadCount } = await req.supabase
       .from('notifications')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
@@ -51,7 +51,7 @@ router.get('/', notificationValidators.pagination, validate, async (req, res, ne
 
 router.patch('/:id/read', [param('id').isUUID()], validate, async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('notifications')
       .update({ is_read: true })
       .eq('id', req.params.id)
@@ -67,7 +67,7 @@ router.patch('/:id/read', [param('id').isUUID()], validate, async (req, res, nex
 
 router.patch('/read-all', async (req, res, next) => {
   try {
-    const { error } = await supabase
+    const { error } = await req.supabase
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', req.user.id)
@@ -80,7 +80,7 @@ router.patch('/read-all', async (req, res, next) => {
 
 router.delete('/:id', [param('id').isUUID()], validate, async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('notifications')
       .delete()
       .eq('id', req.params.id)

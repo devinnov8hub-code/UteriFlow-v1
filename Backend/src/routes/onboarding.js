@@ -11,8 +11,8 @@ import { sendOnboardingCompleteEmail } from '../utils/email.js';
 const router = express.Router();
 router.use(authenticateUser);
 
-const updateProfile = async (userId, fields) => {
-  const { error } = await supabase.from('user_profiles').update(fields).eq('id', userId);
+const updateProfile = async (db, userId, fields) => {
+  const { error } = await db.from('user_profiles').update(fields).eq('id', userId);
   if (error) throw error;
 };
 
@@ -20,7 +20,7 @@ const updateProfile = async (userId, fields) => {
 router.post('/name', onboardingValidators.name, validate, async (req, res, next) => {
   try {
     const { displayName } = req.body;
-    await updateProfile(req.user.id, { display_name: displayName });
+    await updateProfile(req.supabase, req.user.id, { display_name: displayName });
     return success(res, { message: 'Display name updated successfully', displayName });
   } catch (error) { next(error); }
 });
@@ -29,7 +29,7 @@ router.post('/name', onboardingValidators.name, validate, async (req, res, next)
 router.post('/age', onboardingValidators.age, validate, async (req, res, next) => {
   try {
     const { ageGroup } = req.body;
-    await updateProfile(req.user.id, { age_group: ageGroup });
+    await updateProfile(req.supabase, req.user.id, { age_group: ageGroup });
     return success(res, { message: 'Age group updated successfully', ageGroup });
   } catch (error) { next(error); }
 });
@@ -38,7 +38,7 @@ router.post('/age', onboardingValidators.age, validate, async (req, res, next) =
 router.post('/hormonal-status', onboardingValidators.hormonalStatus, validate, async (req, res, next) => {
   try {
     const { hormonalStatus } = req.body;
-    await updateProfile(req.user.id, { hormonal_status: hormonalStatus });
+    await updateProfile(req.supabase, req.user.id, { hormonal_status: hormonalStatus });
     return success(res, { message: 'Hormonal status updated successfully', hormonalStatus });
   } catch (error) { next(error); }
 });
@@ -70,11 +70,11 @@ router.post('/cycle-info', [
     if (periodLengthRange) profileUpdates.period_length_avg = periodLengthMap[periodLengthRange];
     if (cycleLengthRange)  profileUpdates.cycle_length_avg  = cycleLengthMap[cycleLengthRange];
     if (Object.keys(profileUpdates).length) {
-      await updateProfile(userId, profileUpdates);
+      await updateProfile(req.supabase, userId, profileUpdates);
     }
 
     // Seed first period log if none exists yet
-    const { data: existingLog } = await supabase
+    const { data: existingLog } = await req.supabase
       .from('period_logs')
       .select('id')
       .eq('user_id', userId)
@@ -82,7 +82,7 @@ router.post('/cycle-info', [
       .maybeSingle();
 
     if (!existingLog) {
-      await supabase.from('period_logs').insert({
+      await req.supabase.from('period_logs').insert({
         user_id:      userId,
         start_date:   new Date(lastPeriodDate).toISOString().split('T')[0],
         is_first_log: true,
@@ -104,7 +104,7 @@ router.post('/cycle-info', [
 router.post('/period-regularity', onboardingValidators.periodRegularity, validate, async (req, res, next) => {
   try {
     const { periodRegularity } = req.body;
-    await updateProfile(req.user.id, { period_regularity: periodRegularity });
+    await updateProfile(req.supabase, req.user.id, { period_regularity: periodRegularity });
     return success(res, { message: 'Period regularity updated successfully', periodRegularity });
   } catch (error) { next(error); }
 });
@@ -113,7 +113,7 @@ router.post('/period-regularity', onboardingValidators.periodRegularity, validat
 router.post('/health-focus', onboardingValidators.healthFocus, validate, async (req, res, next) => {
   try {
     const { healthFocus } = req.body;
-    await updateProfile(req.user.id, { health_focus: healthFocus });
+    await updateProfile(req.supabase, req.user.id, { health_focus: healthFocus });
     return success(res, { message: 'Health focus areas updated successfully', healthFocus });
   } catch (error) { next(error); }
 });
@@ -122,7 +122,7 @@ router.post('/health-focus', onboardingValidators.healthFocus, validate, async (
 router.post('/personality', onboardingValidators.personality, validate, async (req, res, next) => {
   try {
     const { personalityType, motivationStyle, notificationPref } = req.body;
-    await updateProfile(req.user.id, {
+    await updateProfile(req.supabase, req.user.id, {
       personality_type:  personalityType,
       motivation_style:  motivationStyle,
       notification_pref: notificationPref ?? 'important_only',
@@ -139,12 +139,12 @@ router.post('/personality', onboardingValidators.personality, validate, async (r
 // Final — Mark onboarding complete
 router.post('/complete', async (req, res, next) => {
   try {
-    await updateProfile(req.user.id, {
+    await updateProfile(req.supabase, req.user.id, {
       onboarding_completed: true,
       onboarding_completed_at: new Date().toISOString(),
     });
 
-    const { data: profile } = await supabase
+    const { data: profile } = await req.supabase
       .from('user_profiles')
       .select('email, display_name')
       .eq('id', req.user.id)
@@ -162,7 +162,7 @@ router.post('/complete', async (req, res, next) => {
 // Get own profile (used at any onboarding step to prefill)
 router.get('/profile', async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('user_profiles')
       .select('*')
       .eq('id', req.user.id)

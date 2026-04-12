@@ -17,23 +17,23 @@ router.use(authenticateUser);
 const { pagination, uuidParam, createComment, reportPost } = communityValidators;
 
 // ─── Helper: enrich posts with author, likes, bookmarks, comment_count ─
-async function enrichPosts(posts, userId) {
+async function enrichPosts(db, posts, userId) {
   if (!posts || posts.length === 0) return posts;
   const authorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
   const postIds   = posts.map(p => p.id);
 
   const [profiles, likes, bookmarks, commentRows] = await Promise.all([
     authorIds.length > 0
-      ? supabase.from('user_profiles').select('id, display_name, avatar_url').in('id', authorIds)
+      ? req.supabase.from('user_profiles').select('id, display_name, avatar_url').in('id', authorIds)
       : { data: [] },
     userId
-      ? supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds)
+      ? req.supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds)
       : { data: [] },
     userId
-      ? supabase.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds)
+      ? req.supabase.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds)
       : { data: [] },
     postIds.length > 0
-      ? supabase.from('comments').select('post_id').in('post_id', postIds)
+      ? req.supabase.from('comments').select('post_id').in('post_id', postIds)
       : { data: [] },
   ]);
 
@@ -56,12 +56,12 @@ async function enrichPosts(posts, userId) {
   }));
 }
 
-async function enrichComments(comments) {
+async function enrichComments(db, comments) {
   if (!comments || comments.length === 0) return comments;
   const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))];
   if (authorIds.length === 0) return comments;
 
-  const { data: profiles } = await supabase
+  const { data: profiles } = await req.supabase
     .from('user_profiles')
     .select('id, display_name, avatar_url')
     .in('id', authorIds);
@@ -83,7 +83,7 @@ router.get('/posts', pagination, validate, async (req, res, next) => {
     const { category } = req.query;
     const userId   = req.user.id;
 
-    let q = supabase
+    let q = req.supabase
       .from('posts')
       .select('*', { count: 'exact' })
       .eq('is_published', true)
@@ -95,7 +95,7 @@ router.get('/posts', pagination, validate, async (req, res, next) => {
     const { data: rawPosts, count, error } = await q;
     if (error) throw error;
 
-    const posts = await enrichPosts(rawPosts ?? [], userId);
+    const posts = await enrichPosts(req.supabase, rawPosts ?? [], userId);
     return success(res, { posts, pagination: { total: count, limit, offset, returned: posts.length } });
   } catch (error) { next(error); }
 });
@@ -105,7 +105,7 @@ router.get('/posts/:id', uuidParam, validate, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const { data: post, error } = await supabase
+    const { data: post, error } = await req.supabase
       .from('posts')
       .select('*')
       .eq('id', req.params.id)
@@ -114,10 +114,10 @@ router.get('/posts/:id', uuidParam, validate, async (req, res, next) => {
     if (error) throw error;
     if (!post) throw new NotFoundError('Post not found');
 
-    const { count: commentCount } = await supabase
+    const { count: commentCount } = await req.supabase
       .from('comments').select('*', { count: 'exact', head: true }).eq('post_id', req.params.id);
 
-    const [enriched] = await enrichPosts([post], userId);
+    const [enriched] = await enrichPosts(req.supabase, [post], userId);
     return success(res, { post: { ...enriched, comment_count: commentCount ?? 0 } });
   } catch (error) { next(error); }
 });
@@ -133,7 +133,7 @@ router.post('/posts', [
     const { title, content, category = 'community', image_url } = req.body;
     const userId = req.user.id;
 
-    const { data: post, error } = await supabase
+    const { data: post, error } = await req.supabase
       .from('posts')
       .insert({
         title,
@@ -147,7 +147,7 @@ router.post('/posts', [
       .single();
     if (error) throw error;
 
-    const [enriched] = await enrichPosts([post], userId);
+    const [enriched] = await enrichPosts(req.supabase, [post], userId);
     return success(res, { message: 'Post created successfully', post: enriched }, 201);
   } catch (error) { next(error); }
 });
@@ -157,13 +157,13 @@ router.delete('/posts/:id', uuidParam, validate, async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const { data: existing } = await supabase
+    const { data: existing } = await req.supabase
       .from('posts').select('id, author_id').eq('id', req.params.id).maybeSingle();
 
     if (!existing) throw new NotFoundError('Post not found');
     if (existing.author_id !== userId) throw new AppError('Not authorized to delete this post', 403, 'FORBIDDEN');
 
-    const { error } = await supabase.from('posts').delete().eq('id', req.params.id);
+    const { error } = await req.supabase.from('posts').delete().eq('id', req.params.id);
     if (error) throw error;
 
     return success(res, { message: 'Post deleted successfully' });
@@ -176,18 +176,18 @@ router.post('/posts/:id/like', uuidParam, validate, async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { data: existing } = await supabase
+    const { data: existing } = await req.supabase
       .from('post_likes').select('id').eq('post_id', id).eq('user_id', userId).maybeSingle();
 
     if (existing) {
-      await supabase.from('post_likes').delete().eq('id', existing.id);
-      const { data: post } = await supabase.from('posts').select('likes_count').eq('id', id).maybeSingle();
-      if (post) await supabase.from('posts').update({ likes_count: Math.max(0, (post.likes_count ?? 1) - 1) }).eq('id', id);
+      await req.supabase.from('post_likes').delete().eq('id', existing.id);
+      const { data: post } = await req.supabase.from('posts').select('likes_count').eq('id', id).maybeSingle();
+      if (post) await req.supabase.from('posts').update({ likes_count: Math.max(0, (post.likes_count ?? 1) - 1) }).eq('id', id);
       return success(res, { liked: false, message: 'Post unliked' });
     } else {
-      await supabase.from('post_likes').insert({ post_id: id, user_id: userId });
-      const { data: post } = await supabase.from('posts').select('likes_count').eq('id', id).maybeSingle();
-      if (post) await supabase.from('posts').update({ likes_count: (post.likes_count ?? 0) + 1 }).eq('id', id);
+      await req.supabase.from('post_likes').insert({ post_id: id, user_id: userId });
+      const { data: post } = await req.supabase.from('posts').select('likes_count').eq('id', id).maybeSingle();
+      if (post) await req.supabase.from('posts').update({ likes_count: (post.likes_count ?? 0) + 1 }).eq('id', id);
       return success(res, { liked: true, message: 'Post liked' });
     }
   } catch (error) { next(error); }
@@ -199,14 +199,14 @@ router.post('/posts/:id/bookmark', uuidParam, validate, async (req, res, next) =
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { data: existing } = await supabase
+    const { data: existing } = await req.supabase
       .from('post_bookmarks').select('id').eq('post_id', id).eq('user_id', userId).maybeSingle();
 
     if (existing) {
-      await supabase.from('post_bookmarks').delete().eq('id', existing.id);
+      await req.supabase.from('post_bookmarks').delete().eq('id', existing.id);
       return success(res, { bookmarked: false, message: 'Bookmark removed' });
     } else {
-      await supabase.from('post_bookmarks').insert({ post_id: id, user_id: userId });
+      await req.supabase.from('post_bookmarks').insert({ post_id: id, user_id: userId });
       return success(res, { bookmarked: true, message: 'Post bookmarked' });
     }
   } catch (error) { next(error); }
@@ -219,7 +219,7 @@ router.get('/bookmarks', pagination, validate, async (req, res, next) => {
     const limit  = req.query.limit  ?? 20;
     const offset = req.query.offset ?? 0;
 
-    const { data: bookmarks, count, error } = await supabase
+    const { data: bookmarks, count, error } = await req.supabase
       .from('post_bookmarks')
       .select('post_id', { count: 'exact' })
       .eq('user_id', userId)
@@ -230,8 +230,8 @@ router.get('/bookmarks', pagination, validate, async (req, res, next) => {
     const postIds = (bookmarks ?? []).map(b => b.post_id);
     if (postIds.length === 0) return success(res, { posts: [], pagination: { total: 0, limit, offset } });
 
-    const { data: rawPosts } = await supabase.from('posts').select('*').in('id', postIds).eq('is_published', true);
-    const posts = await enrichPosts(rawPosts ?? [], userId);
+    const { data: rawPosts } = await req.supabase.from('posts').select('*').in('id', postIds).eq('is_published', true);
+    const posts = await enrichPosts(req.supabase, rawPosts ?? [], userId);
 
     return success(res, { posts, pagination: { total: count, limit, offset } });
   } catch (error) { next(error); }
@@ -243,7 +243,7 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
     const limit  = req.query.limit  ?? 30;
     const offset = req.query.offset ?? 0;
 
-    const { data: rawComments, count, error } = await supabase
+    const { data: rawComments, count, error } = await req.supabase
       .from('comments')
       .select('*', { count: 'exact' })
       .eq('post_id', req.params.id)
@@ -252,7 +252,7 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
       .range(offset, offset + limit - 1);
     if (error) throw error;
 
-    const comments = await enrichComments(rawComments ?? []);
+    const comments = await enrichComments(req.supabase, rawComments ?? []);
     return success(res, { comments, pagination: { total: count, limit, offset } });
   } catch (error) { next(error); }
 });
@@ -260,10 +260,10 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
 // ─── Get replies for a comment ────────────────────────────────
 router.get('/comments/:id/replies', uuidParam, validate, async (req, res, next) => {
   try {
-    const { data: rawReplies, error } = await supabase
+    const { data: rawReplies, error } = await req.supabase
       .from('comments').select('*').eq('parent_id', req.params.id).order('created_at', { ascending: true });
     if (error) throw error;
-    const replies = await enrichComments(rawReplies ?? []);
+    const replies = await enrichComments(req.supabase, rawReplies ?? []);
     return success(res, { replies });
   } catch (error) { next(error); }
 });
@@ -276,11 +276,11 @@ router.post('/posts/:id/comments', [...uuidParam, ...createComment], validate, a
     const { content, parentId } = req.body;
     const userId = req.user.id;
 
-    const { data: post } = await supabase
+    const { data: post } = await req.supabase
       .from('posts').select('id').eq('id', req.params.id).maybeSingle();
     if (!post) throw new NotFoundError('Post not found');
 
-    const { data: comment, error } = await supabase
+    const { data: comment, error } = await req.supabase
       .from('comments')
       .insert({ post_id: req.params.id, author_id: userId, content, parent_id: parentId ?? null })
       .select()
@@ -288,11 +288,11 @@ router.post('/posts/:id/comments', [...uuidParam, ...createComment], validate, a
     if (error) throw error;
 
     if (parentId) {
-      const { data: parent } = await supabase.from('comments').select('replies_count').eq('id', parentId).maybeSingle();
-      if (parent) await supabase.from('comments').update({ replies_count: (parent.replies_count ?? 0) + 1 }).eq('id', parentId);
+      const { data: parent } = await req.supabase.from('comments').select('replies_count').eq('id', parentId).maybeSingle();
+      if (parent) await req.supabase.from('comments').update({ replies_count: (parent.replies_count ?? 0) + 1 }).eq('id', parentId);
     }
 
-    const [enriched] = await enrichComments([comment]);
+    const [enriched] = await enrichComments(req.supabase, [comment]);
     return success(res, { message: 'Comment posted successfully', comment: enriched }, 201);
   } catch (error) { next(error); }
 });
@@ -303,26 +303,42 @@ router.post('/comments/:id/like', uuidParam, validate, async (req, res, next) =>
     const { id } = req.params;
     const userId = req.user.id;
 
-    const { data: existing } = await supabase.from('comment_likes').select('id').eq('comment_id', id).eq('user_id', userId).maybeSingle();
+    const { data: existing } = await req.supabase.from('comment_likes').select('id').eq('comment_id', id).eq('user_id', userId).maybeSingle();
 
     if (existing) {
-      await supabase.from('comment_likes').delete().eq('id', existing.id);
-      const { data: c } = await supabase.from('comments').select('likes_count').eq('id', id).maybeSingle();
-      if (c) await supabase.from('comments').update({ likes_count: Math.max(0, (c.likes_count ?? 1) - 1) }).eq('id', id);
+      await req.supabase.from('comment_likes').delete().eq('id', existing.id);
+      const { data: c } = await req.supabase.from('comments').select('likes_count').eq('id', id).maybeSingle();
+      if (c) await req.supabase.from('comments').update({ likes_count: Math.max(0, (c.likes_count ?? 1) - 1) }).eq('id', id);
       return success(res, { liked: false });
     } else {
-      await supabase.from('comment_likes').insert({ comment_id: id, user_id: userId });
-      const { data: c } = await supabase.from('comments').select('likes_count').eq('id', id).maybeSingle();
-      if (c) await supabase.from('comments').update({ likes_count: (c.likes_count ?? 0) + 1 }).eq('id', id);
+      await req.supabase.from('comment_likes').insert({ comment_id: id, user_id: userId });
+      const { data: c } = await req.supabase.from('comments').select('likes_count').eq('id', id).maybeSingle();
+      if (c) await req.supabase.from('comments').update({ likes_count: (c.likes_count ?? 0) + 1 }).eq('id', id);
       return success(res, { liked: true });
     }
+  } catch (error) { next(error); }
+});
+
+
+// ─── Share a post (increments share count) ────────────────────
+router.post('/posts/:id/share', uuidParam, validate, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { data: post } = await req.supabase
+      .from('posts').select('shares_count').eq('id', id).maybeSingle();
+    if (!post) throw new NotFoundError('Post not found');
+    await req.supabase
+      .from('posts')
+      .update({ shares_count: (post.shares_count ?? 0) + 1 })
+      .eq('id', id);
+    return success(res, { message: 'Post shared', shares_count: (post.shares_count ?? 0) + 1 });
   } catch (error) { next(error); }
 });
 
 // ─── Report a post ────────────────────────────────────────────
 router.post('/posts/:id/report', [...uuidParam, ...reportPost], validate, async (req, res, next) => {
   try {
-    await supabase.from('posts').update({ is_flagged: true }).eq('id', req.params.id);
+    await req.supabase.from('posts').update({ is_flagged: true }).eq('id', req.params.id);
     return success(res, { message: 'Post reported. Our team will review it shortly.' });
   } catch (error) { next(error); }
 });

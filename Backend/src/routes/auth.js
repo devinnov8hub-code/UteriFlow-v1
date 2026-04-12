@@ -201,12 +201,25 @@ router.post('/login', authValidators.createPassword, validate, async (req, res, 
 router.post('/token/refresh', async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
-    if (!refreshToken) throw new ValidationError('Refresh token is required.');
+    if (!refreshToken) {
+      return next(new AppError('Refresh token is required.', 400, 'MISSING_REFRESH_TOKEN'));
+    }
     const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
-    if (error || !data?.session) throw new ValidationError('Invalid or expired refresh token. Please log in again.');
+    if (error || !data?.session) {
+      // Always return 401 with a clear code — never return null/empty silently
+      return next(new AppError(
+        'Refresh token is invalid or expired. Please log in again.',
+        401,
+        'REFRESH_TOKEN_EXPIRED'
+      ));
+    }
     return success(res, {
       message: 'Token refreshed successfully',
-      session: { accessToken: data.session.access_token, refreshToken: data.session.refresh_token, expiresAt: data.session.expires_at },
+      session: {
+        accessToken:  data.session.access_token,
+        refreshToken: data.session.refresh_token,
+        expiresAt:    data.session.expires_at,
+      },
     });
   } catch (error) { next(error); }
 });

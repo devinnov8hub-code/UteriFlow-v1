@@ -1,5 +1,5 @@
 import express from 'express';
-import supabase from '../config/supabase.js';
+
 import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { periodValidators } from '../validators/index.js';
@@ -34,9 +34,9 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
   };
 }
 
-async function refreshPredictions(userId) {
+async function refreshPredictions(db, userId) {
   
-  const { data: profile } = await supabase
+  const { data: profile } = await db
     .from('user_profiles')
     .select('cycle_length_avg, period_length_avg')
     .eq('id', userId)
@@ -46,7 +46,7 @@ async function refreshPredictions(userId) {
   const periodLengthAvg = profile?.period_length_avg ?? 5;
 
   
-  const { data: lastLog } = await supabase
+  const { data: lastLog } = await db
     .from('period_logs')
     .select('start_date')
     .eq('user_id', userId)
@@ -59,14 +59,14 @@ async function refreshPredictions(userId) {
   const pred = computePredictions(lastLog.start_date, cycleLengthAvg, periodLengthAvg);
 
   
-  await supabase
+  await db
     .from('cycle_predictions')
     .update({ is_current: false })
     .eq('user_id', userId)
     .eq('is_current', true);
 
   
-  const { data } = await supabase
+  const { data } = await db
     .from('cycle_predictions')
     .insert({ user_id: userId, ...pred, is_current: true })
     .select()
@@ -81,7 +81,7 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
     const { startDate, notes } = req.body;
     const userId = req.user.id;
 
-    const { data: existingLog, error: checkError } = await supabase
+    const { data: existingLog, error: checkError } = await req.supabase
       .from('period_logs')
       .select('id')
       .eq('user_id', userId)
@@ -90,7 +90,7 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
     if (checkError) throw checkError;
     if (existingLog) throw new ConflictError('First period has already been logged');
 
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('period_logs')
       .insert({ user_id: userId, start_date: startDate, notes: notes ?? null, is_first_log: true })
       .select()
@@ -98,7 +98,7 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
     if (error) throw error;
 
     
-    await refreshPredictions(userId).catch(() => {});
+    await refreshPredictions(req.supabase, userId).catch(() => {});
 
     return success(res, { message: 'First period logged successfully', periodLog: data }, 201);
   } catch (error) { next(error); }
@@ -110,7 +110,7 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
     const { startDate, endDate, notes } = req.body;
     const userId = req.user.id;
 
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('period_logs')
       .insert({
         user_id: userId,
@@ -124,7 +124,7 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
     if (error) throw error;
 
     
-    await refreshPredictions(userId).catch(() => {});
+    await refreshPredictions(req.supabase, userId).catch(() => {});
 
     return success(res, { message: 'Period logged successfully', periodLog: data }, 201);
   } catch (error) { next(error); }
@@ -137,7 +137,7 @@ router.get('/logs', periodValidators.pagination, validate, async (req, res, next
     const limit  = req.query.limit  ?? 10;
     const offset = req.query.offset ?? 0;
 
-    const { data, error, count } = await supabase
+    const { data, error, count } = await req.supabase
       .from('period_logs')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
@@ -164,7 +164,7 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
     if (Object.keys(updateData).length === 0)
       return success(res, { message: 'No changes provided' });
 
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('period_logs')
       .update(updateData)
       .eq('id', id)
@@ -174,7 +174,7 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
     if (error) throw error;
     if (!data)  throw new NotFoundError('Period log not found');
 
-    await refreshPredictions(userId).catch(() => {});
+    await refreshPredictions(req.supabase, userId).catch(() => {});
 
     return success(res, { message: 'Period log updated successfully', periodLog: data });
   } catch (error) { next(error); }
@@ -186,7 +186,7 @@ router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res,
     const { id }    = req.params;
     const userId    = req.user.id;
 
-    const { data, error } = await supabase
+    const { data, error } = await req.supabase
       .from('period_logs')
       .delete()
       .eq('id', id)
@@ -196,46 +196,82 @@ router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res,
     if (error) throw error;
     if (!data)  throw new NotFoundError('Period log not found');
 
-    await refreshPredictions(userId).catch(() => {});
+    await refreshPredictions(req.supabase, userId).catch(() => {});
 
     return success(res, { message: 'Period log deleted successfully' });
   } catch (error) { next(error); }
 });
 
+// POST /period/symptoms
+// Creates a new symptom log entry for a given date.
+// If the user already has an entry for that date, it UPDATES it instead of
+// creating a duplicate (upsert behaviour — avoids "no symptom ID" confusion).
 router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res, next) => {
   try {
     const { loggedDate, logId, symptoms, flowLevel, discharge, mood, painLevel, notes } = req.body;
-    const userId = req.user.id;
+    const userId     = req.user.id;
+    const targetDate = loggedDate ?? new Date().toISOString().split('T')[0];
 
-    const { data, error } = await supabase
+    // Check whether an entry already exists for this user+date
+    const { data: existing } = await req.supabase
       .from('period_symptoms')
-      .insert({
-        user_id:     userId,
-        log_id:      logId     ?? null,
-        logged_date: loggedDate ?? new Date().toISOString().split('T')[0],
-        symptoms:    symptoms  ?? [],
-        flow_level:  flowLevel ?? null,
-        discharge:   discharge ?? null,
-        mood:        mood      ?? [],
-        pain_level:  painLevel ?? null,
-        notes:       notes     ?? null,
-      })
-      .select()
-      .single();
-    if (error) throw error;
+      .select('id')
+      .eq('user_id', userId)
+      .eq('logged_date', targetDate)
+      .maybeSingle();
 
-    return success(res, { message: 'Symptoms logged successfully', symptomLog: data }, 201);
+    let data, error;
+
+    if (existing) {
+      // UPDATE the existing entry — this is what allows the frontend to
+      // call POST /symptoms on the same day without creating duplicates
+      ({ data, error } = await req.supabase
+        .from('period_symptoms')
+        .update({
+          log_id:     logId     ?? null,
+          symptoms:   symptoms  ?? [],
+          flow_level: flowLevel ?? null,
+          discharge:  discharge ?? null,
+          mood:       mood      ?? [],
+          pain_level: painLevel ?? null,
+          notes:      notes     ?? null,
+        })
+        .eq('id', existing.id)
+        .select()
+        .single());
+    } else {
+      ({ data, error } = await req.supabase
+        .from('period_symptoms')
+        .insert({
+          user_id:     userId,
+          log_id:      logId     ?? null,
+          logged_date: targetDate,
+          symptoms:    symptoms  ?? [],
+          flow_level:  flowLevel ?? null,
+          discharge:   discharge ?? null,
+          mood:        mood      ?? [],
+          pain_level:  painLevel ?? null,
+          notes:       notes     ?? null,
+        })
+        .select()
+        .single());
+    }
+
+    if (error) throw error;
+    return success(res, { message: 'Symptoms logged successfully', symptomLog: data }, existing ? 200 : 201);
   } catch (error) { next(error); }
 });
 
 
+// GET /period/symptoms — paginated list of all symptom entries for the logged-in user
+// The `id` field is included so the frontend can reference specific entries.
 router.get('/symptoms', periodValidators.pagination, validate, async (req, res, next) => {
   try {
     const userId = req.user.id;
     const limit  = req.query.limit  ?? 30;
     const offset = req.query.offset ?? 0;
 
-    const { data, count, error } = await supabase
+    const { data, count, error } = await req.supabase
       .from('period_symptoms')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
@@ -243,7 +279,27 @@ router.get('/symptoms', periodValidators.pagination, validate, async (req, res, 
       .range(offset, offset + limit - 1);
     if (error) throw error;
 
-    return success(res, { symptoms: data, total: count, limit, offset });
+    return success(res, { symptoms: data ?? [], total: count ?? 0, limit, offset });
+  } catch (error) { next(error); }
+});
+
+
+// GET /period/symptoms/today — convenience endpoint to get today's symptom entry
+// Returns null in `symptomLog` if none logged yet (never returns 404)
+router.get('/symptoms/today', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const today  = new Date().toISOString().split('T')[0];
+
+    const { data, error } = await req.supabase
+      .from('period_symptoms')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('logged_date', today)
+      .maybeSingle();
+    if (error) throw error;
+
+    return success(res, { symptomLog: data ?? null, date: today });
   } catch (error) { next(error); }
 });
 
@@ -252,7 +308,7 @@ router.get('/prediction', async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    const { data: prediction, error } = await supabase
+    const { data: prediction, error } = await req.supabase
       .from('cycle_predictions')
       .select('*')
       .eq('user_id', userId)
@@ -264,7 +320,7 @@ router.get('/prediction', async (req, res, next) => {
 
     if (!prediction) {
       
-      const computed = await refreshPredictions(userId);
+      const computed = await refreshPredictions(req.supabase, userId);
       return success(res, { prediction: computed ?? null });
     }
 
@@ -279,14 +335,14 @@ router.get('/summary', async (req, res, next) => {
     const today  = new Date().toISOString().split('T')[0];
 
   
-    const { data: profile } = await supabase
+    const { data: profile } = await req.supabase
       .from('user_profiles')
       .select('display_name, personality_type, motivation_style, health_focus, hormonal_status, cycle_length_avg, period_length_avg')
       .eq('id', userId)
       .maybeSingle();
 
    
-    const { data: prediction } = await supabase
+    const { data: prediction } = await req.supabase
       .from('cycle_predictions')
       .select('*')
       .eq('user_id', userId)
@@ -296,7 +352,7 @@ router.get('/summary', async (req, res, next) => {
       .maybeSingle();
 
   
-    const { data: lastLog } = await supabase
+    const { data: lastLog } = await req.supabase
       .from('period_logs')
       .select('*')
       .eq('user_id', userId)
@@ -305,7 +361,7 @@ router.get('/summary', async (req, res, next) => {
       .maybeSingle();
 
   
-    const { data: todaySymptoms } = await supabase
+    const { data: todaySymptoms } = await req.supabase
       .from('period_symptoms')
       .select('*')
       .eq('user_id', userId)
@@ -373,15 +429,12 @@ router.get('/summary', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-export default router;
-
-
 router.get('/insights', async (req, res, next) => {
   try {
     const userId = req.user.id;
 
     
-    const { data: logs, error: logsError } = await supabase
+    const { data: logs, error: logsError } = await req.supabase
       .from('period_logs')
       .select('*')
       .eq('user_id', userId)
@@ -424,7 +477,7 @@ router.get('/insights', async (req, res, next) => {
     const averageCycleLength = cyclesTracked > 0 ? Math.round(totalLength / cyclesTracked) : null;
 
    
-    const { data: allSymptoms } = await supabase
+    const { data: allSymptoms } = await req.supabase
       .from('period_symptoms')
       .select('symptoms, discharge, flow_level')
       .eq('user_id', userId);
@@ -445,7 +498,7 @@ router.get('/insights', async (req, res, next) => {
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
     const recentLogs = logs.filter(l => new Date(l.start_date) >= threeMonthsAgo);
   
-    const { data: prediction } = await supabase
+    const { data: prediction } = await req.supabase
       .from('cycle_predictions')
       .select('*')
       .eq('user_id', userId)
@@ -455,7 +508,7 @@ router.get('/insights', async (req, res, next) => {
       .maybeSingle();
 
    
-    const { data: profile } = await supabase
+    const { data: profile } = await req.supabase
       .from('user_profiles')
       .select('personality_type, cycle_length_avg')
       .eq('id', userId)
@@ -480,3 +533,39 @@ router.get('/insights', async (req, res, next) => {
     });
   } catch (error) { next(error); }
 });
+
+// PUT /period/symptoms/:id — update a specific symptom log entry by its ID
+router.put('/symptoms/:id', async (req, res, next) => {
+  try {
+    const { id }     = req.params;
+    const userId     = req.user.id;
+    const { symptoms, flowLevel, discharge, mood, painLevel, notes, loggedDate } = req.body;
+
+    const updates = {};
+    if (symptoms    !== undefined) updates.symptoms    = symptoms;
+    if (flowLevel   !== undefined) updates.flow_level  = flowLevel;
+    if (discharge   !== undefined) updates.discharge   = discharge;
+    if (mood        !== undefined) updates.mood        = mood;
+    if (painLevel   !== undefined) updates.pain_level  = painLevel;
+    if (notes       !== undefined) updates.notes       = notes;
+    if (loggedDate  !== undefined) updates.logged_date = loggedDate;
+
+    if (Object.keys(updates).length === 0) {
+      return success(res, { message: 'No changes provided' });
+    }
+
+    const { data, error } = await req.supabase
+      .from('period_symptoms')
+      .update(updates)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new NotFoundError('Symptom log not found');
+
+    return success(res, { message: 'Symptoms updated successfully', symptomLog: data });
+  } catch (error) { next(error); }
+});
+
+export default router;

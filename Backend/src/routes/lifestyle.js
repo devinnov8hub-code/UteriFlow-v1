@@ -25,7 +25,7 @@ router.get('/', [
     const offset   = req.query.offset ?? 0;
     const { category, search } = req.query;
 
-    let q = supabase
+    let q = req.supabase
       .from('lifestyle_articles')
       .select('id, title, summary, image_url, category, read_time, created_at', { count: 'exact' })
       .eq('is_published', true)
@@ -50,7 +50,7 @@ router.get('/:id', [
   param('id').isUUID().withMessage('Invalid article ID'),
 ], validate, async (req, res, next) => {
   try {
-    const { data: article, error } = await supabase
+    const { data: article, error } = await req.supabase
       .from('lifestyle_articles')
       .select('*')
       .eq('id', req.params.id)
