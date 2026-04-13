@@ -1,8 +1,9 @@
 -- ═══════════════════════════════════════════════════════════════
--- v3: Lifestyle articles table + bug fixes
+-- v3 migration — RUN THIS in Supabase SQL Editor
+-- The "post-images" bucket already exists so section 5 is skipped.
 -- ═══════════════════════════════════════════════════════════════
 
--- ── 1. Fix pain_level constraint to allow 0 (UI "None" option) ──
+-- ── 1. Fix pain_level to allow 0 (UI "None" pelvic pain option) ──
 ALTER TABLE period_symptoms
   DROP CONSTRAINT IF EXISTS period_symptoms_pain_level_check;
 
@@ -10,15 +11,15 @@ ALTER TABLE period_symptoms
   ADD CONSTRAINT period_symptoms_pain_level_check CHECK (pain_level BETWEEN 0 AND 10);
 
 
--- ── 2. Fix posts RLS — ensure authenticated users can read all published posts ──
+-- ── 2. Fix posts RLS so authenticated users can read all posts ────
 DROP POLICY IF EXISTS "posts_select" ON posts;
 
 CREATE POLICY "posts_select"
   ON posts FOR SELECT TO authenticated
-  USING (true);   -- RLS row-level: is_published filter handled in app query
+  USING (true);
 
 
--- ── 3. Lifestyle articles table ──────────────────────────────────
+-- ── 3. Create lifestyle_articles table ───────────────────────────
 CREATE TABLE IF NOT EXISTS lifestyle_articles (
   id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   title        text        NOT NULL,
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS lifestyle_articles (
   image_url    text,
   category     text        NOT NULL DEFAULT 'Daily Habits'
                CHECK (category IN ('Daily Habits', 'Stress Management', 'Cycle Care')),
-  read_time    integer     DEFAULT 4,   -- estimated read time in minutes
+  read_time    integer     DEFAULT 4,
   is_published boolean     DEFAULT true,
   created_at   timestamptz DEFAULT now(),
   updated_at   timestamptz DEFAULT now()
@@ -40,14 +41,13 @@ CREATE POLICY "lifestyle_select"
   ON lifestyle_articles FOR SELECT TO authenticated
   USING (is_published = true);
 
--- Allow admins (service role) to manage articles
 DROP POLICY IF EXISTS "lifestyle_admin" ON lifestyle_articles;
 CREATE POLICY "lifestyle_admin"
   ON lifestyle_articles FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
-CREATE INDEX IF NOT EXISTS idx_lifestyle_category   ON lifestyle_articles(category);
-CREATE INDEX IF NOT EXISTS idx_lifestyle_published  ON lifestyle_articles(is_published);
+CREATE INDEX IF NOT EXISTS idx_lifestyle_category  ON lifestyle_articles(category);
+CREATE INDEX IF NOT EXISTS idx_lifestyle_published ON lifestyle_articles(is_published);
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_lifestyle_articles_updated_at') THEN
@@ -57,7 +57,7 @@ DO $$ BEGIN
 END $$;
 
 
--- ── 4. Seed sample lifestyle articles ────────────────────────────
+-- ── 4. Seed 5 sample lifestyle articles ──────────────────────────
 INSERT INTO lifestyle_articles (title, summary, content, category, read_time, image_url) VALUES
 (
   'Understanding Your Cycle with PCOS',
@@ -69,9 +69,7 @@ This happens because hormonal imbalances can affect ovulation. When ovulation is
 Tracking your cycle can help you better understand your body. By logging your period, symptoms, and changes like discharge or mood, you can begin to notice patterns over time—even if they aren''t perfectly regular.
 
 Remember, every body is different. Your cycle doesn''t need to be "perfect" to be valid. With consistent tracking and awareness, you can gain clearer insights and feel more in control of your health.',
-  'Cycle Care',
-  4,
-  NULL
+  'Cycle Care', 4, NULL
 ),
 (
   'Why Your Cycle Length Changes',
@@ -81,9 +79,7 @@ Remember, every body is different. Your cycle doesn''t need to be "perfect" to b
 A "normal" cycle ranges from 21 to 35 days, but for those with PCOS or other hormonal conditions, it can stretch much longer. Track each cycle start date consistently and over time patterns will emerge.
 
 If your cycle is consistently under 21 days or over 45 days, consider speaking with a healthcare provider.',
-  'Cycle Care',
-  3,
-  NULL
+  'Cycle Care', 3, NULL
 ),
 (
   'Tracking Your Symptoms Effectively',
@@ -93,9 +89,7 @@ If your cycle is consistently under 21 days or over 45 days, consider speaking w
 Over several cycles, these logs become a powerful dataset. You may notice that headaches appear a few days before your period, or that your energy peaks mid-cycle. These patterns are signals from your body.
 
 Use the symptom tracker every day—even on non-period days. Consistency is what turns data into insight.',
-  'Daily Habits',
-  3,
-  NULL
+  'Daily Habits', 3, NULL
 ),
 (
   'Managing Stress to Support Your Cycle',
@@ -105,9 +99,7 @@ Use the symptom tracker every day—even on non-period days. Consistency is what
 Practices like deep breathing, gentle movement, adequate sleep, and time in nature can all lower cortisol levels. You don''t need a perfect routine—small, consistent habits make a real difference.
 
 Track your stress levels alongside your cycle to spot correlations. Many people notice that stressful months correspond with longer or more symptomatic cycles.',
-  'Stress Management',
-  4,
-  NULL
+  'Stress Management', 4, NULL
 ),
 (
   'Nutrition Tips During Your Cycle',
@@ -117,33 +109,16 @@ Track your stress levels alongside your cycle to spot correlations. Many people 
 In the follicular phase, lighter and fresher foods support rising estrogen. The luteal phase—the two weeks before your period—often brings cravings. Magnesium-rich foods like dark chocolate, nuts, and bananas can ease PMS symptoms.
 
 Staying hydrated and reducing processed foods, especially in the week before your period, can reduce bloating and mood swings significantly.',
-  'Daily Habits',
-  5,
-  NULL
+  'Daily Habits', 5, NULL
 )
 ON CONFLICT DO NOTHING;
 
 
--- ── 5. Supabase Storage bucket for post images ───────────────────
--- Run this in the Supabase SQL editor OR via the dashboard:
---   Storage → New bucket → Name: "post-images" → Public: YES
---
--- If you prefer SQL (requires pg_extensions with storage schema):
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-  'post-images',
-  'post-images',
-  true,
-  5242880,   -- 5 MB
-  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-)
-ON CONFLICT (id) DO UPDATE SET
-  public             = true,
-  file_size_limit    = 5242880,
-  allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+-- ── 5. Storage policies for post-images bucket ───────────────────
+-- Your bucket already exists and is PUBLIC ✅
+-- Just make sure these 3 policies are set (check Storage → Policies tab).
+-- If they are already there, this will safely replace them.
 
--- Storage RLS — authenticated users can upload to their own folder
--- Folder structure: {userId}/{filename}
 DROP POLICY IF EXISTS "Users upload own images" ON storage.objects;
 CREATE POLICY "Users upload own images"
   ON storage.objects FOR INSERT TO authenticated

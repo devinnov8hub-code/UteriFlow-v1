@@ -13,6 +13,7 @@ import communityAdminRoutes from './routes/community.js';
 import userCommunityRoutes from './routes/user_community.js';
 import profileRoutes      from './routes/profile.js';
 import lifestyleRoutes    from './routes/lifestyle.js';
+import uploadRoutes       from './routes/upload.js';
 import notificationRoutes from './routes/notifications.js';
 import { AppError } from './errors/index.js';
 
@@ -42,6 +43,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
+// Raw body for multipart upload — must come before express.json
+app.use('/api/v1/upload', (req, res, next) => {
+  // Let the upload route handle its own body parsing (multipart)
+  if (req.headers['content-type']?.startsWith('multipart/form-data')) return next();
+  next();
+});
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
@@ -110,6 +117,7 @@ app.use('/api/v1/onboarding',    onboardingRoutes);
 app.use('/api/v1/period',        periodRoutes);
 app.use('/api/v1/community',     userCommunityRoutes);
 app.use('/api/v1/lifestyle',     lifestyleRoutes);
+app.use('/api/v1/upload',        uploadRoutes);
 app.use('/api/v1/profile',       profileRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/admin',         adminRoutes);

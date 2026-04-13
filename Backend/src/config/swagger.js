@@ -24,6 +24,8 @@ export const swaggerSpec = {
     { name: 'Notifications',  description: 'In-app notifications for the current user' },
     { name: 'Admin',          description: 'Admin-only: user management, stats, period log oversight' },
     { name: 'Admin Community',description: 'Admin-only: post/comment moderation and analytics' },
+    { name: 'Lifestyle',      description: 'Health library articles by category' },
+    { name: 'Upload',         description: 'File upload — images for posts and avatars' },
   ],
   components: {
     securitySchemes: {
@@ -181,6 +183,7 @@ export const swaggerSpec = {
       ValidationError:   { description: 'Validation or business logic error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       Unauthorized:      { description: 'Missing or invalid JWT token',       content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       UnauthorizedError: { description: 'Missing or invalid JWT token',       content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      BadRequest:        { description: 'Bad request — validation error',    content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       Forbidden:         { description: 'Forbidden — admin access required',  content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' }, example: { error: 'Forbidden: admin access required', code: 'FORBIDDEN' } } } },
       NotFound:          { description: 'Resource not found',                 content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       NotFoundError:     { description: 'Resource not found',                 content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
@@ -1194,12 +1197,13 @@ export const swaggerSpec = {
                   logId: { type: 'string', format: 'uuid', nullable: true },
                   symptoms: {
                     type: 'array',
-                    items: { type: 'string', enum: ['cramps','bloating','headache','backache','nausea','fatigue','breast_tenderness','acne','mood_swings','spotting','insomnia','food_cravings','hot_flashes','other'] },
+                    items: { type: 'string', enum: ['cramps','bloating','headache','backache','nausea','fatigue','breast_tenderness','acne','mood_swings','spotting','insomnia','food_cravings','hot_flashes','fever','weight_gain','migraines','heavy_flow','pelvic_pain','cravings','other'] },
                     example: ['cramps', 'fatigue'],
                   },
+                  discharge: { type: 'string', enum: ['dry','sticky','creamy','egg_white'], nullable: true, example: 'sticky' },
                   flowLevel: { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'], nullable: true, example: 'medium' },
                   mood: { type: 'array', items: { type: 'string', enum: ['happy','sad','anxious','irritable','calm','energetic','depressed','emotional'] }, example: ['anxious'] },
-                  painLevel: { type: 'integer', minimum: 1, maximum: 10, nullable: true, example: 6 },
+                  painLevel: { type: 'integer', minimum: 0, maximum: 10, nullable: true, example: 3, description: '0=None, 3=Mild, 6=Moderate, 9=Severe' },
                   notes: { type: 'string', nullable: true },
                 },
               },
@@ -1230,7 +1234,7 @@ export const swaggerSpec = {
     '/period/insights': {
       get: {
         tags: ['Period Tracking'],
-        summary: 'Cycle insights and analytics (Insights Dashboard)',
+        summary: 'Cycle insights and analytics (Screen 4 — Insights Dashboard)',
         description: 'Returns cycles tracked, longest/shortest cycle, average cycle length, bar chart history data, frequent symptoms, and recent logs for the calendar view.',
         security: [{ bearerAuth: [] }],
         responses: {
@@ -1721,6 +1725,281 @@ export const swaggerSpec = {
         },
       },
     },
+
+    // ── NEW: SYMPTOMS TODAY + UPDATE ─────────────────────────────────────────
+    '/period/symptoms/today': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'Get today\'s symptom entry',
+        description: 'Returns the symptom log for today, or null if none logged yet. Never returns 404. Use this on screen load to pre-fill the symptom form.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Today\'s symptom entry or null',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    symptomLog: { nullable: true, allOf: [{ $ref: '#/components/schemas/SymptomLog' }] },
+                    date: { type: 'string', format: 'date', example: '2026-04-12' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/period/symptoms/{id}': {
+      put: {
+        tags: ['Period Tracking'],
+        summary: 'Update a specific symptom log entry by ID',
+        description: 'Update any field on an existing symptom log. Only the fields you include are changed.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  loggedDate: { type: 'string', format: 'date' },
+                  symptoms:   { type: 'array', items: { type: 'string' } },
+                  flowLevel:  { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'] },
+                  discharge:  { type: 'string', enum: ['dry','sticky','creamy','egg_white'] },
+                  mood:       { type: 'array', items: { type: 'string' } },
+                  painLevel:  { type: 'integer', minimum: 0, maximum: 10 },
+                  notes:      { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Symptom log updated', content: { 'application/json': { schema: { type: 'object', properties: { symptomLog: { $ref: '#/components/schemas/SymptomLog' } } } } } },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NEW: COMMUNITY CREATE + DELETE + SHARE ────────────────────────────────
+    '/community/posts/create': {
+      post: {
+        tags: ['Community'],
+        summary: 'Create a community post',
+        description: 'Creates a new post as the authenticated user. If adding an image, first upload it via POST /upload/image to get the URL, then pass it here as image_url.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'content'],
+                properties: {
+                  title:     { type: 'string', maxLength: 200, example: 'My PCOS Journey' },
+                  content:   { type: 'string', example: 'I have been dealing with irregular cycles...' },
+                  category:  { type: 'string', enum: ['community','lifestyle_tips','discord'], default: 'community' },
+                  image_url: { type: 'string', format: 'uri', nullable: true, example: 'https://xxx.supabase.co/storage/v1/object/public/post-images/...' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Post created', content: { 'application/json': { schema: { type: 'object', properties: { post: { $ref: '#/components/schemas/Post' } } } } } },
+          400: { $ref: '#/components/responses/BadRequest' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/community/posts/{id}/delete': {
+      delete: {
+        tags: ['Community'],
+        summary: 'Delete own post',
+        description: 'Permanently deletes a post. Only the original author can delete their own post.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Post deleted successfully' },
+          403: { $ref: '#/components/responses/Forbidden' },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/community/posts/{id}/share': {
+      post: {
+        tags: ['Community'],
+        summary: 'Share a post (increments share count)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: {
+            description: 'Share count incremented',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', example: 'Post shared' },
+                    shares_count: { type: 'integer', example: 4 },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NEW: LIFESTYLE ────────────────────────────────────────────────────────
+    '/lifestyle': {
+      get: {
+        tags: ['Lifestyle'],
+        summary: 'List health library articles',
+        description: 'Returns published lifestyle articles. Filter by category or search by title. Used for the Health Library / Lifestyle screen.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { in: 'query', name: 'category', schema: { type: 'string', enum: ['Daily Habits', 'Stress Management', 'Cycle Care'] }, description: 'Filter by category tab' },
+          { in: 'query', name: 'search',   schema: { type: 'string', maxLength: 200 }, description: 'Search by article title' },
+          { in: 'query', name: 'limit',    schema: { type: 'integer', default: 10, minimum: 1, maximum: 50 } },
+          { in: 'query', name: 'offset',   schema: { type: 'integer', default: 0, minimum: 0 } },
+        ],
+        responses: {
+          200: {
+            description: 'Article list (without full content — fetch /lifestyle/:id for reading view)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    articles: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id:         { type: 'string', format: 'uuid' },
+                          title:      { type: 'string', example: 'Understanding Your Cycle with PCOS' },
+                          summary:    { type: 'string', example: 'Learn how irregular cycles work...' },
+                          image_url:  { type: 'string', nullable: true },
+                          category:   { type: 'string', enum: ['Daily Habits','Stress Management','Cycle Care'] },
+                          read_time:  { type: 'integer', example: 4, description: 'Estimated read time in minutes' },
+                          created_at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    pagination: { $ref: '#/components/schemas/Pagination' },
+                  },
+                },
+              },
+            },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/lifestyle/{id}': {
+      get: {
+        tags: ['Lifestyle'],
+        summary: 'Get full article (reading view)',
+        description: 'Returns all fields including the full article content. Use this for the reading view screen.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Article UUID' }],
+        responses: {
+          200: {
+            description: 'Full article with content',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    article: {
+                      type: 'object',
+                      properties: {
+                        id:         { type: 'string', format: 'uuid' },
+                        title:      { type: 'string' },
+                        summary:    { type: 'string' },
+                        content:    { type: 'string', description: 'Full article body text' },
+                        image_url:  { type: 'string', nullable: true },
+                        category:   { type: 'string' },
+                        read_time:  { type: 'integer' },
+                        created_at: { type: 'string', format: 'date-time' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          404: { $ref: '#/components/responses/NotFound' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NEW: UPLOAD ───────────────────────────────────────────────────────────
+    '/upload/image': {
+      post: {
+        tags: ['Upload'],
+        summary: 'Upload an image and get a public URL',
+        description: [
+          'Upload an image file (jpeg/png/webp/gif, max 5 MB) to Supabase Storage.',
+          'Returns a permanent public URL you pass as `image_url` when creating a post.',
+          '',
+          '**Two-step flow for creating a post with an image:**',
+          '1. `POST /upload/image` → get back `{ url: "https://..." }`',
+          '2. `POST /community/posts` → pass `image_url: "<url from step 1>"`',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: {
+                  file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Image file. Allowed types: jpeg, png, webp, gif. Max size: 5 MB.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Image uploaded — use the returned URL as image_url in POST /community/posts',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    message: { type: 'string', example: 'Image uploaded successfully' },
+                    url:     { type: 'string', format: 'uri', example: 'https://xxx.supabase.co/storage/v1/object/public/post-images/userId/1712000000-abc123.jpg' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'No file, unsupported type, or file too large' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+          503: { description: 'Storage service unavailable — SUPABASE_SERVICE_ROLE_KEY missing' },
+        },
+      },
+    },
+
   },
 
   // ── SCHEMAS ───────────────────────────────────────────────────────────────
