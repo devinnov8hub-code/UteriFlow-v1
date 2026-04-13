@@ -120,8 +120,8 @@ app.use('/api/v1/lifestyle',     lifestyleRoutes);
 app.use('/api/v1/upload',        uploadRoutes);
 app.use('/api/v1/profile',       profileRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
-app.use('/api/v1/admin',         adminRoutes);
-app.use('/api/v1/admin',         communityAdminRoutes);
+app.use('/api/v1/admin',           adminRoutes);
+app.use('/api/v1/admin/community', communityAdminRoutes);
 
 
 app.use((req, res) => res.status(404).json({ error: `Route ${req.method} ${req.path} not found`, code: 'NOT_FOUND' }));

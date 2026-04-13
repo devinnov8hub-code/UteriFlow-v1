@@ -26,7 +26,7 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
   fertileEnd.setDate(ovulation.getDate() + 1);
 
   return {
-    predicted_start:      predictedStart.toISOString().split('T')[0],
+    predicted_start:      predictedStart.toISOString().split('T')[0],                                                                                                                                                                                                                                                                                                                                                                                                                                               
     predicted_end:        predictedEnd.toISOString().split('T')[0],
     ovulation_date:       ovulation.toISOString().split('T')[0],
     fertile_window_start: fertileStart.toISOString().split('T')[0],

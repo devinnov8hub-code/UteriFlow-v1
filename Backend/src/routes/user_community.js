@@ -24,16 +24,16 @@ async function enrichPosts(db, posts, userId) {
 
   const [profiles, likes, bookmarks, commentRows] = await Promise.all([
     authorIds.length > 0
-      ? req.supabase.from('user_profiles').select('id, display_name, avatar_url').in('id', authorIds)
+      ? db.from('user_profiles').select('id, display_name, avatar_url').in('id', authorIds)
       : { data: [] },
     userId
-      ? req.supabase.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds)
+      ? db.from('post_likes').select('post_id').eq('user_id', userId).in('post_id', postIds)
       : { data: [] },
     userId
-      ? req.supabase.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds)
+      ? db.from('post_bookmarks').select('post_id').eq('user_id', userId).in('post_id', postIds)
       : { data: [] },
     postIds.length > 0
-      ? req.supabase.from('comments').select('post_id').in('post_id', postIds)
+      ? db.from('comments').select('post_id').in('post_id', postIds)
       : { data: [] },
   ]);
 
@@ -61,7 +61,7 @@ async function enrichComments(db, comments) {
   const authorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))];
   if (authorIds.length === 0) return comments;
 
-  const { data: profiles } = await req.supabase
+  const { data: profiles } = await db
     .from('user_profiles')
     .select('id, display_name, avatar_url')
     .in('id', authorIds);
@@ -127,7 +127,11 @@ router.post('/posts', [
   body('title').trim().notEmpty().withMessage('Title is required').isLength({ max: 200 }),
   body('content').trim().notEmpty().withMessage('Content is required'),
   body('category').optional().isIn(['community', 'lifestyle_tips', 'discord']).withMessage('Invalid category'),
-  body('image_url').optional({ nullable: true }).isURL().withMessage('image_url must be a valid URL'),
+  // Treat empty string the same as null/undefined — isURL("") is false so we
+  // normalise the value to undefined before the validator runs, which makes
+  // optional({ nullable: true }) skip the isURL check entirely.
+  body('image_url').customSanitizer(v => (v === '' ? undefined : v))
+    .optional({ nullable: true }).isURL().withMessage('image_url must be a valid URL'),
 ], validate, async (req, res, next) => {
   try {
     const { title, content, category = 'community', image_url } = req.body;
