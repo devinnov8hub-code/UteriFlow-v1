@@ -1,0 +1,94 @@
+/*
+ * Admin-section styles. Everything that would otherwise affect the whole
+ * document (resets, body background, base font-size) is now scoped under
+ * `.admin-app` so the landing page (mounted in the same SPA) is unaffected.
+ *
+ * The :root CSS custom properties stay global — they don't change anything
+ * on their own; they just expose values for admin components that read them
+ * via `var(--purple)` etc.
+ */
+
+:root {
+  --purple-deep:   #3d0a55;
+  --purple:        #4a1060;
+  --purple-mid:    #6b2d8b;
+  --purple-light:  #9b59b6;
+  --purple-pale:   #f3e8ff;
+  --purple-xpale:  #faf5ff;
+  --accent:        #7c3aed;
+  --accent-light:  #a78bfa;
+  --white:         #ffffff;
+  --gray-50:       #f9fafb;
+  --gray-100:      #f3f4f6;
+  --gray-200:      #e5e7eb;
+  --gray-300:      #d1d5db;
+  --gray-400:      #9ca3af;
+  --gray-500:      #6b7280;
+  --gray-600:      #4b5563;
+  --gray-700:      #374151;
+  --gray-900:      #111827;
+  --green:         #10b981;
+  --green-light:   #d1fae5;
+  --red:           #ef4444;
+  --red-light:     #fee2e2;
+  --yellow:        #f59e0b;
+  --yellow-light:  #fef3c7;
+  --sidebar-w:     210px;
+  --radius:        12px;
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow:        0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg:     0 8px 28px rgba(0,0,0,0.12);
+  --transition:    all 0.18s ease;
+}
+
+/* Scoped resets — only inside the admin section */
+.admin-app, .admin-app *, .admin-app *::before, .admin-app *::after {
+  box-sizing: border-box;
+}
+.admin-app *, .admin-app *::before, .admin-app *::after {
+  margin: 0;
+  padding: 0;
+}
+
+.admin-app {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-900);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  /* Override the landing's html font-size assumption — admin styles were
+     tuned at 15px base. Use a local font-size on the wrapper so children
+     using rem-based admin styles get the same look as before. */
+  font-size: 15px;
+}
+
+.admin-app button { cursor: pointer; font-family: inherit; }
+.admin-app input,
+.admin-app textarea,
+.admin-app select { font-family: inherit; }
+.admin-app a { text-decoration: none; color: inherit; }
+
+/* Scrollbars only inside admin */
+.admin-app ::-webkit-scrollbar { width: 5px; height: 5px; }
+.admin-app ::-webkit-scrollbar-track { background: transparent; }
+.admin-app ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 10px; }
+.admin-app ::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.admin-app .animate-fade  { animation: fadeIn 0.25s ease both; }
+.admin-app .animate-slide { animation: slideRight 0.22s ease both; }

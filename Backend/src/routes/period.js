@@ -441,14 +441,27 @@ router.get('/insights', async (req, res, next) => {
       .order('start_date', { ascending: true });
     if (logsError) throw logsError;
 
+    // Fetch profile early — used both for empty-state defaults and the tip
+    const { data: profile } = await req.supabase
+      .from('user_profiles')
+      .select('personality_type, cycle_length_avg, period_length_avg')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const profileCycleAvg  = profile?.cycle_length_avg  ?? null;
+    const profilePeriodAvg = profile?.period_length_avg ?? 5;
+
     if (!logs || logs.length === 0) {
       return success(res, {
         insights: {
           cyclesTracked: 0,
           longestCycle: null,
           shortestCycle: null,
-          averageCycleLength: null,
+          averageCycleLength: profileCycleAvg, // use onboarding estimate if set
+          cycleRange: null,
           cycleHistory: [],
+          recentLogs: [],
+          prediction: null,
           frequentSymptoms: [],
           tip: 'Log your first period to start seeing cycle insights.',
         },
@@ -474,7 +487,32 @@ router.get('/insights', async (req, res, next) => {
     }
 
     const cyclesTracked = cycleHistory.length;
-    const averageCycleLength = cyclesTracked > 0 ? Math.round(totalLength / cyclesTracked) : null;
+
+    // If we have at least one completed cycle, use the measured average.
+    // Otherwise fall back to the user's onboarding cycle_length_avg so the UI
+    // always has a number to display instead of null.
+    const averageCycleLength = cyclesTracked > 0
+      ? Math.round(totalLength / cyclesTracked)
+      : profileCycleAvg;
+
+    // When the user only has 1 log, compute the in-progress cycle (last log → today)
+    // so the chart and history aren't empty. Mark it as `inProgress: true` so the UI
+    // can style it differently (e.g. dashed bar) if desired.
+    if (logs.length >= 1 && cyclesTracked === 0) {
+      const lastLog = logs[logs.length - 1];
+      const lastStart = new Date(lastLog.start_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const daysSoFar = Math.round((today - lastStart) / 86400000);
+      if (daysSoFar > 0 && daysSoFar < 120) {
+        cycleHistory.push({
+          label: 'Current',
+          days: daysSoFar,
+          startDate: lastLog.start_date,
+          inProgress: true,
+        });
+      }
+    }
 
    
     const { data: allSymptoms } = await req.supabase
@@ -507,16 +545,17 @@ router.get('/insights', async (req, res, next) => {
       .limit(1)
       .maybeSingle();
 
-   
-    const { data: profile } = await req.supabase
-      .from('user_profiles')
-      .select('personality_type, cycle_length_avg')
-      .eq('id', userId)
-      .maybeSingle();
-
-    const cycleRange = cyclesTracked > 1
-      ? `${shortestCycle}–${longestCycle} days`
-      : null;
+    // cycleRange shows the measured min–max only when we have >1 completed cycles.
+    // For 1 completed cycle, just show the single value. For 0 cycles but a known
+    // onboarding average, show that so the UI card isn't blank.
+    let cycleRange = null;
+    if (cyclesTracked > 1) {
+      cycleRange = `${shortestCycle}–${longestCycle} days`;
+    } else if (cyclesTracked === 1) {
+      cycleRange = `${longestCycle} days`;
+    } else if (profileCycleAvg) {
+      cycleRange = `~${profileCycleAvg} days`;
+    }
 
     return success(res, {
       insights: {

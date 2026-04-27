@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+*{
+  font-family: "Montserrat", sans-serif;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-18px); }
+}
+
+@theme{
+  --color-primary-color: #330030;
+  --color-secondary-color:  #990090;
+  --color-linear-color: linear-gradient(135deg, #990090 0%, #330030 100%);
+  --color-soft-color: #FFF5FE;
+}

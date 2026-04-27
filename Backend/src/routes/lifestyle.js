@@ -1,17 +1,20 @@
 /**
  * Lifestyle / Health Library routes
  * Mounted at /api/v1/lifestyle
+ *
+ * NOTE: These endpoints are PUBLIC (no authenticateUser middleware).
+ * The landing page (uteriflow.com/articles) fetches articles to display to
+ * unauthenticated visitors as part of the marketing/wellness content. Only
+ * `is_published = true` articles are returned, so this is safe.
  */
 import express from 'express';
 import { query, param } from 'express-validator';
 import supabase from '../config/supabase.js';
-import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 
 const router = express.Router();
-router.use(authenticateUser);
 
 // GET /api/v1/lifestyle?category=Daily+Habits&search=pcos&limit=10&offset=0
 router.get('/', [
@@ -25,7 +28,7 @@ router.get('/', [
     const offset   = req.query.offset ?? 0;
     const { category, search } = req.query;
 
-    let q = req.supabase
+    let q = supabase
       .from('lifestyle_articles')
       .select('id, title, summary, image_url, category, read_time, created_at', { count: 'exact' })
       .eq('is_published', true)
@@ -50,7 +53,7 @@ router.get('/:id', [
   param('id').isUUID().withMessage('Invalid article ID'),
 ], validate, async (req, res, next) => {
   try {
-    const { data: article, error } = await req.supabase
+    const { data: article, error } = await supabase
       .from('lifestyle_articles')
       .select('*')
       .eq('id', req.params.id)

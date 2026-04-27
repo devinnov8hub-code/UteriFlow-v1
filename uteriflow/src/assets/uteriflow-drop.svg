@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Purple drop matching the admin brand. Used as the icon-only logo
+       in the landing Header (next to the "UteriFlow" wordmark text) and
+       the Waitlist hero on white surfaces. -->
+  <defs>
+    <linearGradient id="dropGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5C0A52" />
+      <stop offset="100%" stop-color="#3F0036" />
+    </linearGradient>
+  </defs>
+  <path
+    d="M32 4 C 32 4, 12 26, 12 40 a 20 20 0 0 0 40 0 C 52 26, 32 4, 32 4 Z"
+    fill="url(#dropGrad)"
+  />
+</svg>

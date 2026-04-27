@@ -55,6 +55,57 @@
 
 /**
  * @swagger
+ * /api/v1/profile/change-password:
+ *   post:
+ *     summary: Change the authenticated user's password
+ *     tags: [Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [currentPassword, newPassword, confirmPassword]
+ *             properties:
+ *               currentPassword: { type: string, format: password }
+ *               newPassword: { type: string, format: password, minLength: 8 }
+ *               confirmPassword: { type: string, format: password }
+ *     responses:
+ *       200: { description: Password changed successfully }
+ *       400: { description: Validation failed }
+ *       401: { description: Unauthorized }
+ */
+
+/**
+ * @swagger
+ * /api/v1/profile/account:
+ *   delete:
+ *     summary: Permanently delete the authenticated user's account
+ *     description: >
+ *       Requires the user's current password as a confirmation step. Deletes the
+ *       Supabase auth record and cascades all associated data (profile, period
+ *       logs, symptoms, predictions, posts, comments, notifications).
+ *       This is irreversible.
+ *     tags: [Profile]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [password]
+ *             properties:
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200: { description: Account permanently deleted }
+ *       400: { description: Incorrect password }
+ *       401: { description: Unauthorized }
+ */
+
+/**
+ * @swagger
  * /api/v1/profile/{id}:
  *   get:
  *     summary: Get a public user profile

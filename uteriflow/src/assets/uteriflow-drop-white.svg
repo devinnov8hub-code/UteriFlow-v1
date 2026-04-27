@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- White drop variant for use on the purple gradient waitlist hero. -->
+  <path
+    d="M32 4 C 32 4, 12 26, 12 40 a 20 20 0 0 0 40 0 C 52 26, 32 4, 32 4 Z"
+    fill="#ffffff"
+  />
+</svg>
