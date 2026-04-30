@@ -244,12 +244,29 @@ router.get('/bookmarks', pagination, validate, async (req, res, next) => {
 // ─── Get comments for a post ──────────────────────────────────
 router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async (req, res, next) => {
   try {
-    const limit  = req.query.limit  ?? 30;
-    const offset = req.query.offset ?? 0;
+    const limit  = Number(req.query.limit  ?? 30);
+    const offset = Number(req.query.offset ?? 0);
 
-    const { data: rawComments, count, error } = await req.supabase
+    // First, get the total count of top-level comments for this post.
+    const { count: total, error: countError } = await req.supabase
       .from('comments')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'exact', head: true })
+      .eq('post_id', req.params.id)
+      .is('parent_id', null);
+    if (countError) throw countError;
+
+    // If offset is past the end, return an empty page instead of letting
+    // PostgREST raise a "Requested range not satisfiable" error.
+    if (total !== null && offset >= total) {
+      return success(res, {
+        comments: [],
+        pagination: { total: total ?? 0, limit, offset, returned: 0 },
+      });
+    }
+
+    const { data: rawComments, error } = await req.supabase
+      .from('comments')
+      .select('*')
       .eq('post_id', req.params.id)
       .is('parent_id', null)
       .order('created_at', { ascending: true })
@@ -257,18 +274,45 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
     if (error) throw error;
 
     const comments = await enrichComments(req.supabase, rawComments ?? []);
-    return success(res, { comments, pagination: { total: count, limit, offset } });
+    return success(res, {
+      comments,
+      pagination: { total: total ?? 0, limit, offset, returned: comments.length },
+    });
   } catch (error) { next(error); }
 });
 
 // ─── Get replies for a comment ────────────────────────────────
-router.get('/comments/:id/replies', uuidParam, validate, async (req, res, next) => {
+router.get('/comments/:id/replies', [...uuidParam, ...pagination], validate, async (req, res, next) => {
   try {
+    const limit  = Number(req.query.limit  ?? 30);
+    const offset = Number(req.query.offset ?? 0);
+
+    const { count: total, error: countError } = await req.supabase
+      .from('comments')
+      .select('*', { count: 'exact', head: true })
+      .eq('parent_id', req.params.id);
+    if (countError) throw countError;
+
+    if (total !== null && offset >= total) {
+      return success(res, {
+        replies: [],
+        pagination: { total: total ?? 0, limit, offset, returned: 0 },
+      });
+    }
+
     const { data: rawReplies, error } = await req.supabase
-      .from('comments').select('*').eq('parent_id', req.params.id).order('created_at', { ascending: true });
+      .from('comments')
+      .select('*')
+      .eq('parent_id', req.params.id)
+      .order('created_at', { ascending: true })
+      .range(offset, offset + limit - 1);
     if (error) throw error;
+
     const replies = await enrichComments(req.supabase, rawReplies ?? []);
-    return success(res, { replies });
+    return success(res, {
+      replies,
+      pagination: { total: total ?? 0, limit, offset, returned: replies.length },
+    });
   } catch (error) { next(error); }
 });
 
