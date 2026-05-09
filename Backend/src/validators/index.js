@@ -1,6 +1,6 @@
 import { body, param, query } from 'express-validator';
 
-// ─── Auth ──────────────────────────────────────────────────────
+
 export const authValidators = {
   email: [
     body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }).withMessage('A valid email address is required'),
@@ -35,7 +35,7 @@ export const authValidators = {
   ],
 };
 
-   
+
 export const onboardingValidators = {
   name: [
     body('displayName').trim().isLength({ min: 1, max: 50 }).withMessage('Display name must be between 1 and 50 characters'),
@@ -45,6 +45,12 @@ export const onboardingValidators = {
   ],
   hormonalStatus: [
     body('hormonalStatus').isIn(['diagnosed', 'suspected', 'not_sure', 'no']).withMessage('Invalid hormonal status'),
+  ],
+  // PRD canonical PCOS field — accepts the PRD vocabulary (confirmed/suspected/none).
+  // Either the legacy /hormonal-status or the new /pcos-status endpoint can be used;
+  // they keep each other in sync server-side. New clients should prefer this one.
+  pcosStatus: [
+    body('pcosStatus').isIn(['confirmed', 'suspected', 'none']).withMessage('Invalid PCOS status. Use: confirmed | suspected | none'),
   ],
   periodRegularity: [
     body('periodRegularity').isIn(['regular', 'varies_week', 'unpredictable', 'not_tracked']).withMessage('Invalid period regularity value'),
@@ -56,20 +62,29 @@ export const onboardingValidators = {
       'fertility', 'hair_issues', 'fatigue', 'other',
     ]).withMessage('One or more invalid health focus values'),
   ],
-  // NEW — cycle info step (last period date + length estimates, Figma screens 6-8)
+
   cycleInfo: [
     body('lastPeriodDate').isISO8601().toDate().withMessage('lastPeriodDate must be a valid date'),
-    // Figma: "How long does your period usually last?" — 1-2 days | 3-5 days | 6-8 days | More than 9 days
+
     body('periodLengthRange')
       .optional()
       .isIn(['1_2', '3_5', '6_8', '9_plus'])
       .withMessage('Invalid period length. Use: 1_2, 3_5, 6_8, or 9_plus'),
-    // Figma: "How long was your last cycle?" — Less than 21 | 21-35 days | 36-60 days | More than 60 days
+
     body('cycleLengthRange')
       .optional()
       .isIn(['lt_21', '21_35', '36_60', 'gt_60'])
       .withMessage('Invalid cycle length. Use: lt_21, 21_35, 36_60, or gt_60'),
   ],
+
+  // Bug 3 fix: contraceptive captured at onboarding
+  contraceptive: [
+    body('contraceptiveType').isIn([
+      'none', 'combined_pill', 'mini_pill', 'hormonal_iud',
+      'implant', 'injectable', 'other_hormonal', 'prefer_not_to_say',
+    ]).withMessage('Invalid contraceptive type'),
+  ],
+
   personality: [
     body('personalityType')
       .isIn(['cycle_sharer', 'health_optimizer', 'silent_tracker', 'community_seeker'])
@@ -84,7 +99,44 @@ export const onboardingValidators = {
   ],
 };
 
-// ─── Period ─────────────────────────────────────────────────────
+
+// Allowed values for the daily symptom checklist.
+//
+// Bug 4 fix: 'protected_sex', 'unprotected_sex', and 'started_changed_contraceptive'
+// added so sexual activity and contraceptive changes can be logged the same way as
+// cramps or fatigue (single tap, no separate clinical screen — matches Flo UX).
+//
+// Also added PCOS-relevant symptoms (excess_hair, hair_thinning,
+// weight_gain_difficulty, skin_darkening, high_libido) that the PCOS Flag
+// Evaluator and Symptom Intelligence Engine reference.
+export const ALLOWED_SYMPTOMS = [
+  // Existing core symptoms (production — DO NOT remove)
+  'cramps', 'bloating', 'headache', 'backache', 'nausea',
+  'fatigue', 'breast_tenderness', 'acne', 'mood_swings',
+  'spotting', 'insomnia', 'food_cravings', 'hot_flashes',
+  'fever', 'weight_gain', 'migraines',
+  'heavy_flow', 'pelvic_pain', 'cravings', 'other',
+
+  // PRD §4.4 — additional inference-engine symptom
+  'high_libido',
+
+  // PRD Appendix A — PCOS Flag Evaluator inputs (Flags E, G)
+  'excess_hair',
+  'hair_thinning',
+  'weight_gain_difficulty',
+  'skin_darkening',
+
+  // PRD Bug 4 — sexual activity items (logged same as any other symptom)
+  'protected_sex',
+  'unprotected_sex',
+
+  // PRD Bug 3 fix (c) — contraceptive change item; logging this also lets
+  // the client send `contraceptiveType` in the same request to update the
+  // user profile and re-route the engine in one step.
+  'started_changed_contraceptive',
+];
+
+
 export const periodValidators = {
   logCreate: [
     body('startDate').isISO8601().toDate().withMessage('startDate must be a valid ISO 8601 date'),
@@ -103,33 +155,39 @@ export const periodValidators = {
     query('offset').optional().isInt({ min: 0 }).toInt().withMessage('Offset must be a non-negative integer'),
   ],
   symptomLog: [
-    body('loggedDate').optional().isISO8601().toDate().withMessage('loggedDate must be a valid date'),
+    body('loggedDate').optional().isISO8601().toDate().withMessage('loggedDate must be a valid date')
+      .custom((value) => {
+        // Past dates are explicitly allowed (users frequently back-fill missed
+        // logs from the previous days/weeks). Future dates are not — the user
+        // cannot have logged how they felt on a day that hasn't happened yet.
+        if (value && new Date(value) > new Date()) {
+          throw new Error('loggedDate cannot be in the future');
+        }
+        return true;
+      }),
     body('logId').optional({ nullable: true }).isUUID().withMessage('logId must be a valid UUID'),
     body('symptoms').isArray().withMessage('symptoms must be an array'),
-    body('symptoms.*').isIn([
-      // Physical symptoms matching the UI (Screen 3)
-      'cramps', 'bloating', 'headache', 'backache', 'nausea',
-      'fatigue', 'breast_tenderness', 'acne', 'mood_swings',
-      'spotting', 'insomnia', 'food_cravings', 'hot_flashes',
-      'fever', 'weight_gain', 'migraines',
-      // Additional values used by the Flutter UI
-      'heavy_flow', 'pelvic_pain', 'cravings', 'other',
-    ]).withMessage('One or more invalid symptom values'),
+    body('symptoms.*').isIn(ALLOWED_SYMPTOMS).withMessage('One or more invalid symptom values'),
     body('flowLevel').optional({ nullable: true })
       .isIn(['spotting', 'light', 'medium', 'heavy', 'very_heavy']).withMessage('Invalid flow level'),
-    // Discharge field (Screen 3 — "Observe your fluid to identify your most fertile days")
     body('discharge').optional({ nullable: true })
-      .isIn(['dry', 'sticky', 'creamy', 'egg_white']).withMessage('Invalid discharge type'),
+      .isIn(['dry', 'sticky', 'creamy', 'watery', 'egg_white']).withMessage('Invalid discharge type'),
     body('mood').optional().isArray().withMessage('mood must be an array'),
     body('mood.*').isIn(['happy', 'sad', 'anxious', 'irritable', 'calm', 'energetic', 'depressed', 'emotional'])
       .withMessage('One or more invalid mood values'),
-    // Pelvic pain mapped to pain_level (Screen 3 — none/mild/moderate/severe → 0/3/6/9)
     body('painLevel').optional({ nullable: true }).isInt({ min: 0, max: 10 }).withMessage('Pain level must be between 0 and 10'),
     body('notes').optional({ nullable: true }).trim().isLength({ max: 1000 }),
+    // Optional follow-up payload for the 'started_changed_contraceptive' symptom item.
+    // When the user taps that item, the frontend should immediately ask which method
+    // and forward it here so the engine can re-route on the same request.
+    body('contraceptiveType').optional({ nullable: true }).isIn([
+      'none', 'combined_pill', 'mini_pill', 'hormonal_iud',
+      'implant', 'injectable', 'other_hormonal', 'prefer_not_to_say',
+    ]).withMessage('Invalid contraceptive type'),
   ],
 };
 
-// ─── Community (user-facing) ────────────────────────────────────
+
 export const communityValidators = {
   pagination: [
     query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
@@ -146,7 +204,7 @@ export const communityValidators = {
   ],
 };
 
-// ─── Profile ────────────────────────────────────────────────────
+
 export const profileValidators = {
   update: [
     body('displayName').optional().trim().isLength({ min: 1, max: 50 }),
@@ -155,10 +213,17 @@ export const profileValidators = {
     body('cycleLengthAvg').optional().isInt({ min: 14, max: 60 }),
     body('periodLengthAvg').optional().isInt({ min: 1, max: 14 }),
     body('notificationPref').optional().isIn(['all', 'important_only', 'none']),
+    // Allow profile-level updates for these PRD-canonical fields too,
+    // for the "Settings" screens that aren't part of onboarding.
+    body('contraceptiveType').optional().isIn([
+      'none', 'combined_pill', 'mini_pill', 'hormonal_iud',
+      'implant', 'injectable', 'other_hormonal', 'prefer_not_to_say',
+    ]).withMessage('Invalid contraceptive type'),
+    body('pcosStatus').optional().isIn(['confirmed', 'suspected', 'none']),
   ],
 };
 
-// ─── Notifications ──────────────────────────────────────────────
+
 export const notificationValidators = {
   pagination: [
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),

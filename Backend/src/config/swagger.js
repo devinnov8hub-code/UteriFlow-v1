@@ -64,14 +64,22 @@ export const swaggerSpec = {
           bio:                     { type: 'string', nullable: true },
           avatar_url:              { type: 'string', nullable: true },
           age_group:               { type: 'string', nullable: true },
-          hormonal_status:         { type: 'string', nullable: true },
-          period_regularity:       { type: 'string', nullable: true },
+          hormonal_status:         { type: 'string', nullable: true, enum: ['diagnosed','suspected','not_sure','no'], description: 'Legacy onboarding field. Kept for backward compatibility. New clients should read pcos_status instead.' },
+          pcos_status:             { type: 'string', nullable: true, enum: ['confirmed','suspected','none'], description: 'PRD canonical PCOS field. Mirrors hormonal_status with PRD vocabulary. Source of truth for the insight engine.' },
+          pcos_tier:               { type: 'string', nullable: true, enum: ['none','possible','likely','confirmed'], description: 'App-derived PCOS likelihood tier (PRD Appendix A). Recomputed each time /summary, /phase, or /daily-insight is called.' },
+          period_regularity:       { type: 'string', nullable: true, enum: ['regular','varies_week','unpredictable','not_tracked'] },
           health_focus:            { type: 'array', items: { type: 'string' } },
+          contraceptive_type:      { type: 'string', nullable: true, enum: ['none','combined_pill','mini_pill','hormonal_iud','implant','injectable','other_hormonal','prefer_not_to_say'], description: 'Captured at onboarding (POST /onboarding/contraceptive) or updated mid-app via the started_changed_contraceptive symptom item. Hormonal types suppress ovulation/fertile predictions.' },
+          contraceptive_changed_at: { type: 'string', format: 'date-time', nullable: true },
+          last_period_start:       { type: 'string', format: 'date', nullable: true, description: 'Raw onboarding answer — preserved verbatim even after the user logs more periods.' },
+          cycle_length_range:      { type: 'string', nullable: true, enum: ['lt_21','21_35','36_60','gt_60'], description: 'Onboarding range bucket — preserves the user\'s chosen answer for re-display in settings.' },
+          period_length_range:     { type: 'string', nullable: true, enum: ['1_2','3_5','6_8','9_plus'] },
+          user_type:               { type: 'string', nullable: true, enum: ['REGULAR','IRREGULAR','PCOS'], description: 'Cached classification (PRD §2.4). Recomputed by the engine on each context-loading endpoint call.' },
           personality_type:        { type: 'string', nullable: true },
           motivation_style:        { type: 'string', nullable: true },
           notification_pref:       { type: 'string', nullable: true },
-          cycle_length_avg:        { type: 'integer', default: 28 },
-          period_length_avg:       { type: 'integer', default: 5 },
+          cycle_length_avg:        { type: 'integer', nullable: true, description: 'NULL when the user hasn\'t provided cycle data yet. PRD Rule 1: never default to 28.' },
+          period_length_avg:       { type: 'integer', nullable: true, description: 'NULL when the user hasn\'t provided period length yet.' },
           onboarding_completed:    { type: 'boolean' },
           onboarding_completed_at: { type: 'string', format: 'date-time', nullable: true },
           created_at:              { type: 'string', format: 'date-time' },
@@ -97,10 +105,33 @@ export const swaggerSpec = {
           id:          { type: 'string', format: 'uuid' },
           user_id:     { type: 'string', format: 'uuid' },
           log_id:      { type: 'string', format: 'uuid', nullable: true },
-          logged_date: { type: 'string', format: 'date' },
-          symptoms:    { type: 'array', items: { type: 'string' } },
+          logged_date: { type: 'string', format: 'date', description: 'The date these symptoms apply to. Past dates are explicitly allowed (back-fill missed logs); future dates are rejected.' },
+          symptoms:    {
+            type: 'array',
+            description: 'Daily symptom checklist items. Includes physical symptoms, sexual activity (PRD Bug 4), and the started_changed_contraceptive item (PRD Bug 3).',
+            items: {
+              type: 'string',
+              enum: [
+                // Core physical symptoms
+                'cramps','bloating','headache','backache','nausea',
+                'fatigue','breast_tenderness','acne','mood_swings',
+                'spotting','insomnia','food_cravings','hot_flashes',
+                'fever','weight_gain','migraines',
+                'heavy_flow','pelvic_pain','cravings','other',
+                // PRD §4.4 — Symptom Intelligence inputs
+                'high_libido',
+                // PRD Appendix A — PCOS Flag Evaluator inputs
+                'excess_hair','hair_thinning','weight_gain_difficulty','skin_darkening',
+                // PRD Bug 4 — sexual activity (logged exactly like cramps/fatigue)
+                'protected_sex','unprotected_sex',
+                // PRD Bug 3 fix (c) — contraceptive change item; pair with
+                // contraceptiveType in the request body to update profile in one call
+                'started_changed_contraceptive',
+              ],
+            },
+          },
           flow_level:  { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'], nullable: true },
-          discharge:   { type: 'string', enum: ['dry','sticky','creamy','egg_white'], nullable: true },
+          discharge:   { type: 'string', enum: ['dry','sticky','creamy','watery','egg_white'], nullable: true, description: 'watery added per PRD §4.4 — used by the symptom intelligence engine to infer ovulation.' },
           mood:        { type: 'array', items: { type: 'string' } },
           pain_level:  { type: 'integer', nullable: true },
           notes:       { type: 'string', nullable: true },
@@ -119,6 +150,92 @@ export const swaggerSpec = {
           ovulation_date:       { type: 'string', format: 'date', nullable: true },
           is_current:           { type: 'boolean' },
           created_at:           { type: 'string', format: 'date-time' },
+        },
+      },
+
+      // ── PRD Engine schemas (used by /summary, /phase, /daily-insight) ──
+      PhaseEnum: {
+        type: 'string',
+        nullable: true,
+        enum: [
+          'MENSTRUAL', 'FOLLICULAR', 'OVULATION', 'APPROACHING_OVULATION',
+          'LUTEAL', 'LATE', 'LATE_MENSTRUAL_OR_FOLLICULAR',
+        ],
+        description: 'Canonical PRD phase enum. NULL for PCOS users when symptom inference yields no signal, or for new users with insufficient data.',
+      },
+      EngineStats: {
+        type: 'object',
+        properties: {
+          avgCycleLength: { type: 'integer', nullable: true, description: 'Mean of last 3-6 logged cycle lengths. NULL when fewer than 2 periods logged AND no onboarding estimate.' },
+          avgBleedLength: { type: 'integer', nullable: true },
+          stdDev:         { type: 'number',  nullable: true, description: 'Standard deviation of cycle lengths. >7 → IRREGULAR per PRD §2.4.' },
+          cyclesUsed:     { type: 'integer', description: 'How many completed cycles fed the average (capped at 6).' },
+          minCycle:       { type: 'integer', nullable: true },
+          maxCycle:       { type: 'integer', nullable: true },
+        },
+      },
+      ContraceptiveState: {
+        type: 'object',
+        properties: {
+          type:                 { type: 'string', nullable: true, enum: ['none','combined_pill','mini_pill','hormonal_iud','implant','injectable','other_hormonal','prefer_not_to_say'] },
+          isHormonal:           { type: 'boolean' },
+          ovulationSuppressed:  { type: 'boolean', description: 'When true, the engine has suppressed ovulation/fertile window content (PRD Bug 3 fix b).' },
+          changedAt:            { type: 'string', format: 'date-time', nullable: true },
+        },
+      },
+      LatePeriodPathway: {
+        type: 'object',
+        description: 'PRD Bug 4 fix (c). Triggered when a regular/irregular user is 7+ days late AND has logged unprotected sex within the estimated fertile window of the current cycle.',
+        properties: {
+          triggered: { type: 'boolean' },
+          reason:    { type: 'string', enum: ['pcos_excluded','on_contraceptive','insufficient_data','not_late_enough','no_unprotected_in_fertile_window','late_with_unprotected_sex_in_fertile_window'] },
+          daysLate:  { type: 'integer', nullable: true },
+          fertileWindow: {
+            type: 'object', nullable: true,
+            properties: {
+              start: { type: 'string', format: 'date' },
+              end:   { type: 'string', format: 'date' },
+            },
+          },
+        },
+      },
+      InferredPhase: {
+        type: 'object',
+        properties: {
+          inferredPhase: { $ref: '#/components/schemas/PhaseEnum' },
+          signals:       { type: 'array', items: { type: 'string' }, description: 'Symptom rules that fired (e.g. egg_white_mucus, luteal_pattern).' },
+          confidence:    { type: 'string', enum: ['high','medium','low','none'] },
+        },
+      },
+      EngineContext: {
+        type: 'object',
+        description: 'PRD §3-4 engine output. Returned by /period/phase and embedded under /period/summary.engine.',
+        properties: {
+          phase:        { $ref: '#/components/schemas/PhaseEnum' },
+          phaseSource:  { type: 'string', enum: ['calendar','symptom_inference','pcos_no_calendar','insufficient_data'] },
+          phaseDetails: { type: 'object', nullable: true, description: 'When phaseSource=calendar: cycleDay, avgCycleLength, ovulationDay, fertileWindowStart, fertileWindowEnd. For IRREGULAR users also includes ovulationRange.' },
+          userType:     { type: 'string', enum: ['REGULAR','IRREGULAR','PCOS'] },
+          pcosStatus:   { type: 'string', nullable: true, enum: ['confirmed','suspected','none'] },
+          pcosTier:     { type: 'string', enum: ['none','possible','likely','confirmed'] },
+          pcosFlags:    { type: 'array', items: { type: 'string', enum: ['A','B','C','D','E','F','G','H'] }, description: 'PRD Appendix A flags currently triggered.' },
+          confidence:   { type: 'string', enum: ['high','medium-high','medium','low','none'] },
+          cycleDay:     { type: 'integer', nullable: true, description: '1-indexed day in current cycle. NULL when no period logged yet.' },
+          daysSinceLastPeriod: { type: 'integer', nullable: true },
+          stats:        { $ref: '#/components/schemas/EngineStats' },
+          contraceptive: { $ref: '#/components/schemas/ContraceptiveState' },
+          latePeriodPathway: { $ref: '#/components/schemas/LatePeriodPathway' },
+        },
+      },
+      DailyInsight: {
+        type: 'object',
+        properties: {
+          key:        { type: 'string', description: 'Stable identifier used for cooldown tracking.' },
+          title:      { type: 'string', description: 'Max 60 chars (PRD §5.2).' },
+          body:       { type: 'string', description: 'Max 280 chars (PRD §5.2).' },
+          actionLink: { type: 'object', nullable: true, properties: { type: { type: 'string' }, title: { type: 'string' } } },
+          isFallback: { type: 'boolean' },
+          score:      { type: 'integer', description: 'Final priority score after symptom matches and recency penalty.' },
+          source:     { type: 'string', enum: ['library','fallback_library'] },
         },
       },
       Post: {
@@ -485,7 +602,17 @@ export const swaggerSpec = {
     '/onboarding/hormonal-status': {
       post: {
         tags: ['Onboarding'],
-        summary: 'Set hormonal diagnosis status',
+        summary: 'Set hormonal diagnosis status (legacy — prefer /onboarding/pcos-status for new clients)',
+        description: [
+          'Captures the user\'s PCOS diagnosis status using the legacy four-value enum.',
+          '',
+          '**PRD Bug 1 fix:** this endpoint now ALSO writes the canonical `pcos_status` field (PRD vocabulary) so the insight engine routes PCOS users to the correct content track immediately.',
+          '',
+          'Mapping applied:',
+          '- `diagnosed` → `pcos_status=confirmed` (PCOS track on, pcos_tier=confirmed)',
+          '- `suspected` → `pcos_status=suspected` (watch flags)',
+          '- `not_sure` / `no` → `pcos_status=none` (standard track)',
+        ].join('\n'),
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -494,9 +621,81 @@ export const swaggerSpec = {
           } } } },
         },
         responses: {
-          200: { description: 'Hormonal status updated', content: { 'application/json': { schema: { type: 'object', properties: {
+          200: { description: 'Hormonal status updated; pcos_status synchronised', content: { 'application/json': { schema: { type: 'object', properties: {
             message:        { type: 'string' },
             hormonalStatus: { type: 'string' },
+            pcosStatus:     { type: 'string', enum: ['confirmed','suspected','none'], description: 'The PRD-canonical value derived from hormonalStatus.' },
+          } } } } },
+          400: { $ref: '#/components/responses/ValidationError' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NEW (PRD Bug 1 fix): canonical PCOS status endpoint ─────────────────
+    '/onboarding/pcos-status': {
+      post: {
+        tags: ['Onboarding'],
+        summary: 'Set PCOS status (PRD canonical endpoint — preferred for new clients)',
+        description: [
+          'Captures PCOS status using the PRD vocabulary (`confirmed | suspected | none`). This is the field the insight engine reads.',
+          '',
+          'Either this endpoint OR `/onboarding/hormonal-status` can be used at onboarding — both keep both columns in sync, so existing clients are unaffected.',
+          '',
+          'When `pcosStatus = "confirmed"`, the user\'s `pcos_tier` is set to `"confirmed"` and they are routed to the PCOS insight track immediately, bypassing calendar-based phase calculation per PRD Rule 5.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['pcosStatus'], properties: {
+            pcosStatus: { type: 'string', enum: ['confirmed', 'suspected', 'none'], example: 'suspected' },
+          } } } },
+        },
+        responses: {
+          200: { description: 'PCOS status updated; hormonal_status synchronised', content: { 'application/json': { schema: { type: 'object', properties: {
+            message:        { type: 'string' },
+            pcosStatus:     { type: 'string' },
+            hormonalStatus: { type: 'string', description: 'Legacy field, mirrored from pcosStatus.' },
+          } } } } },
+          400: { $ref: '#/components/responses/ValidationError' },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── NEW (PRD Bug 3 fix): contraceptive capture ──────────────────────────
+    '/onboarding/contraceptive': {
+      post: {
+        tags: ['Onboarding'],
+        summary: 'Set contraceptive type (PRD Bug 3 fix — captured at onboarding)',
+        description: [
+          'Adds the missing onboarding question that captures whether the user is on hormonal birth control. Without this, the engine was applying natural-cycle logic to suppressed cycles and showing fertility content to users on the pill / IUD / implant.',
+          '',
+          '**Engine behaviour triggered by hormonal contraceptive types** (`combined_pill`, `mini_pill`, `hormonal_iud`, `implant`, `injectable`, `other_hormonal`):',
+          '- `GET /period/prediction` returns `prediction: null`, `suppressed: true`',
+          '- `GET /period/summary` sets `cyclePhase: "contraceptive_suppressed"` and `prediction: null`',
+          '- `GET /period/daily-insight` filters to contraceptive-aware content cards',
+          '- The PCOS Flag C (90-day amenorrhoea) is suppressed for these users',
+          '',
+          '`prefer_not_to_say` is treated as non-hormonal (no suppression). `none` is the explicit "no hormonal contraceptive" choice.',
+          '',
+          '**To update mid-app:** users tap the `started_changed_contraceptive` item in the daily symptom checklist (POST /period/symptoms) and the frontend prompts for the new method, all in one request.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['contraceptiveType'], properties: {
+            contraceptiveType: {
+              type: 'string',
+              enum: ['none','combined_pill','mini_pill','hormonal_iud','implant','injectable','other_hormonal','prefer_not_to_say'],
+              example: 'combined_pill',
+            },
+          } } } },
+        },
+        responses: {
+          200: { description: 'Contraceptive type saved; engine routing updated', content: { 'application/json': { schema: { type: 'object', properties: {
+            message:           { type: 'string' },
+            contraceptiveType: { type: 'string' },
           } } } } },
           400: { $ref: '#/components/responses/ValidationError' },
           401: { $ref: '#/components/responses/Unauthorized' },
@@ -1109,7 +1308,15 @@ export const swaggerSpec = {
       post: {
         tags: ['Onboarding'],
         summary: 'Save last period date and cycle/period length estimates',
-        description: 'Screens 6-8 in Figma. Saves the last period start date (seeds the first period log), how long the period usually lasts, and how long the cycle usually is. Used to compute the first cycle prediction.',
+        description: [
+          'Screens 6-8 in Figma. Saves the last period start date (seeds the first period log), how long the period usually lasts, and how long the cycle usually is. Used to compute the first cycle prediction.',
+          '',
+          '**PRD Bug 2 fix:**',
+          '- The raw `lastPeriodDate` is now persisted to `user_profiles.last_period_start` (in addition to seeding `period_logs`).',
+          '- The original range strings (`periodLengthRange`, `cycleLengthRange`) are persisted alongside the midpoint integers, so settings screens can re-display the user\'s actual choice.',
+          '- **If `cycleLengthRange` is omitted, `cycle_length_avg` is left NULL (no 28-day default).** The engine reads NULL as "we don\'t know yet" and downgrades confidence accordingly per PRD Rule 1.',
+          '- Same applies to `periodLengthRange` → `period_length_avg`.',
+        ].join('\n'),
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -1121,19 +1328,19 @@ export const swaggerSpec = {
                 properties: {
                   lastPeriodDate: {
                     type: 'string', format: 'date', example: '2026-03-15',
-                    description: 'Start date of the most recent period',
+                    description: 'Start date of the most recent period. REQUIRED — seeds the first period log and is preserved as last_period_start on the profile.',
                   },
                   periodLengthRange: {
                     type: 'string',
                     enum: ['1_2', '3_5', '6_8', '9_plus'],
                     example: '3_5',
-                    description: 'How long the period usually lasts. Maps to Figma options: 1_2 = 1-2 days, 3_5 = 3-5 days, 6_8 = 6-8 days, 9_plus = More than 9 days',
+                    description: 'OPTIONAL. How long the period usually lasts. Maps to Figma options: 1_2 = 1-2 days, 3_5 = 3-5 days, 6_8 = 6-8 days, 9_plus = More than 9 days. If omitted, period_length_avg stays NULL.',
                   },
                   cycleLengthRange: {
                     type: 'string',
                     enum: ['lt_21', '21_35', '36_60', 'gt_60'],
                     example: '21_35',
-                    description: 'How long the cycle usually lasts. Maps to Figma options: lt_21 = Less than 21 days, 21_35 = 21-35 days, 36_60 = 36-60 days, gt_60 = More than 60 days',
+                    description: 'OPTIONAL. How long the cycle usually lasts. Maps to Figma options: lt_21 = Less than 21 days, 21_35 = 21-35 days, 36_60 = 36-60 days, gt_60 = More than 60 days. If omitted, cycle_length_avg stays NULL — the engine will NOT default to 28.',
                   },
                 },
               },
@@ -1141,7 +1348,17 @@ export const swaggerSpec = {
           },
         },
         responses: {
-          200: { description: 'Cycle info saved and first period log seeded' },
+          200: {
+            description: 'Cycle info saved and first period log seeded',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              message:           { type: 'string' },
+              lastPeriodDate:    { type: 'string', format: 'date' },
+              periodLengthRange: { type: 'string', nullable: true },
+              cycleLengthRange:  { type: 'string', nullable: true },
+              periodLengthAvg:   { type: 'integer', nullable: true, description: 'Midpoint integer derived from periodLengthRange. NULL when range was omitted.' },
+              cycleLengthAvg:    { type: 'integer', nullable: true, description: 'Midpoint integer derived from cycleLengthRange. NULL when range was omitted.' },
+            } } } },
+          },
           400: { $ref: '#/components/responses/ValidationError' },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
@@ -1182,8 +1399,16 @@ export const swaggerSpec = {
     '/period/symptoms': {
       post: {
         tags: ['Period Tracking'],
-        summary: 'Log symptoms for a day',
-        description: 'Log physical symptoms, flow level, mood, and pain level. Optionally link to a period log via logId.',
+        summary: 'Log symptoms for a day (today or any past date)',
+        description: [
+          'Log physical symptoms, flow level, discharge, mood, and pain level for a given date. The endpoint is upsert-style: posting again for the same `loggedDate` overwrites the existing entry instead of creating duplicates.',
+          '',
+          '**Past dates are explicitly allowed** — users frequently back-fill missed logs for the previous day or week. Future dates are rejected.',
+          '',
+          '**PRD Bug 4 fix — Sexual activity:** `protected_sex` and `unprotected_sex` are now valid `symptoms[]` items. They are logged exactly like cramps or fatigue (no separate clinical screen, matching the Flo UX). The late-period pathway uses these retrospectively when computing daily insights.',
+          '',
+          '**PRD Bug 3 fix (c) — Contraceptive change pathway:** when `symptoms[]` includes `started_changed_contraceptive`, the request body may also include a top-level `contraceptiveType` field. If both are present, the user\'s profile contraceptive_type is updated in the same request and the engine re-routes immediately. If `contraceptiveType` is omitted, the response includes `promptContraceptiveType: true` so the frontend can ask which method.',
+        ].join('\n'),
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -1193,25 +1418,62 @@ export const swaggerSpec = {
                 type: 'object',
                 required: ['symptoms'],
                 properties: {
-                  loggedDate: { type: 'string', format: 'date', example: '2026-04-03' },
+                  loggedDate: { type: 'string', format: 'date', example: '2026-04-03', description: 'Defaults to today. Past dates allowed; future dates rejected.' },
                   logId: { type: 'string', format: 'uuid', nullable: true },
                   symptoms: {
                     type: 'array',
-                    items: { type: 'string', enum: ['cramps','bloating','headache','backache','nausea','fatigue','breast_tenderness','acne','mood_swings','spotting','insomnia','food_cravings','hot_flashes','fever','weight_gain','migraines','heavy_flow','pelvic_pain','cravings','other'] },
+                    items: {
+                      type: 'string',
+                      enum: [
+                        'cramps','bloating','headache','backache','nausea',
+                        'fatigue','breast_tenderness','acne','mood_swings',
+                        'spotting','insomnia','food_cravings','hot_flashes',
+                        'fever','weight_gain','migraines',
+                        'heavy_flow','pelvic_pain','cravings','other',
+                        'high_libido',
+                        'excess_hair','hair_thinning','weight_gain_difficulty','skin_darkening',
+                        'protected_sex','unprotected_sex',
+                        'started_changed_contraceptive',
+                      ],
+                    },
                     example: ['cramps', 'fatigue'],
                   },
-                  discharge: { type: 'string', enum: ['dry','sticky','creamy','egg_white'], nullable: true, example: 'sticky' },
+                  discharge: { type: 'string', enum: ['dry','sticky','creamy','watery','egg_white'], nullable: true, example: 'sticky' },
                   flowLevel: { type: 'string', enum: ['spotting','light','medium','heavy','very_heavy'], nullable: true, example: 'medium' },
                   mood: { type: 'array', items: { type: 'string', enum: ['happy','sad','anxious','irritable','calm','energetic','depressed','emotional'] }, example: ['anxious'] },
                   painLevel: { type: 'integer', minimum: 0, maximum: 10, nullable: true, example: 3, description: '0=None, 3=Mild, 6=Moderate, 9=Severe' },
                   notes: { type: 'string', nullable: true },
+                  contraceptiveType: {
+                    type: 'string',
+                    enum: ['none','combined_pill','mini_pill','hormonal_iud','implant','injectable','other_hormonal','prefer_not_to_say'],
+                    nullable: true,
+                    description: 'OPTIONAL — only meaningful when `symptoms[]` includes `started_changed_contraceptive`. Pair the symptom item with this field to update the user profile and re-route the engine in a single request.',
+                  },
                 },
               },
             },
           },
         },
         responses: {
-          201: { description: 'Symptoms logged', content: { 'application/json': { schema: { type: 'object', properties: { symptomLog: { $ref: '#/components/schemas/SymptomLog' } } } } } },
+          200: {
+            description: 'Existing symptom log for this date was updated (upsert).',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              symptomLog: { $ref: '#/components/schemas/SymptomLog' },
+              contraceptiveUpdated:    { type: 'boolean', description: 'Set to true when contraceptive_type was updated as a side effect of logging started_changed_contraceptive.' },
+              contraceptiveType:       { type: 'string', nullable: true },
+              promptContraceptiveType: { type: 'boolean', description: 'True when started_changed_contraceptive was logged but no new contraceptiveType was supplied. Frontend should prompt the user.' },
+            } } } },
+          },
+          201: {
+            description: 'New symptom log created.',
+            content: { 'application/json': { schema: { type: 'object', properties: {
+              symptomLog: { $ref: '#/components/schemas/SymptomLog' },
+              contraceptiveUpdated:    { type: 'boolean' },
+              contraceptiveType:       { type: 'string', nullable: true },
+              promptContraceptiveType: { type: 'boolean' },
+            } } } },
+          },
+          400: { description: 'Validation error (invalid symptom enum, future loggedDate, etc.)' },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
       },
@@ -1273,10 +1535,31 @@ export const swaggerSpec = {
       get: {
         tags: ['Period Tracking'],
         summary: 'Get current cycle prediction',
-        description: 'Returns predicted next period start/end, ovulation date, and fertile window. Auto-recalculated on every period log.',
+        description: [
+          'Returns predicted next period start/end, ovulation date, and fertile window. Auto-recalculated on every period log.',
+          '',
+          '**PRD Bug 3 fix (b):** for users on hormonal contraception, returns `prediction: null` plus `suppressed: true` and `suppressedReason: "hormonal_contraceptive"`. The frontend must NOT show ovulation or fertile-window UI in that case.',
+          '',
+          '**PRD Rule 1:** if the user has neither logged enough cycles for a measured average NOR provided an onboarding estimate, returns `prediction: null` rather than fabricating a 28-day default.',
+        ].join('\n'),
         security: [{ bearerAuth: [] }],
         responses: {
-          200: { description: 'Cycle prediction', content: { 'application/json': { schema: { type: 'object', properties: { prediction: { $ref: '#/components/schemas/CyclePrediction' } } } } } },
+          200: {
+            description: 'Cycle prediction (or null when suppressed/insufficient data)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    prediction:       { allOf: [{ $ref: '#/components/schemas/CyclePrediction' }], nullable: true },
+                    suppressed:       { type: 'boolean', description: 'Present when prediction is suppressed for hormonal contraceptive users.' },
+                    suppressedReason: { type: 'string', enum: ['hormonal_contraceptive'], description: 'Why predictions are suppressed.' },
+                    message:          { type: 'string', description: 'Human-readable explanation, useful for UI surfacing.' },
+                  },
+                },
+              },
+            },
+          },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
       },
@@ -1287,7 +1570,15 @@ export const swaggerSpec = {
       get: {
         tags: ['Period Tracking'],
         summary: 'Home screen dashboard summary',
-        description: 'Returns cycle phase, days until next period, personalised tip (driven by personality_type), today\'s symptoms, and current prediction. Primary endpoint for the app home screen.',
+        description: [
+          'Returns cycle phase, days until next period, personalised tip, today\'s symptoms, and current prediction. Primary endpoint for the app home screen.',
+          '',
+          '**Backward-compatible:** existing fields (`cyclePhase`, `prediction`, `lastPeriod`, `todaySymptoms`, `personalizedTip`, `profile.*`) are unchanged. New clients should also read the `engine` block for the full PRD output.',
+          '',
+          '**PRD Bug 3 fix (b):** for users on hormonal contraception, `prediction` is `null` and `cyclePhase` is `contraceptive_suppressed`. The legacy fertile-window UI must not render in that case.',
+          '',
+          '**PRD Bug 1 fix:** PCOS users get `engine.pcosTier` set and `engine.userType=PCOS`, and `engine.phase` is symptom-inferred (not calendar-derived).',
+        ].join('\n'),
         security: [{ bearerAuth: [] }],
         responses: {
           200: {
@@ -1300,10 +1591,15 @@ export const swaggerSpec = {
                     summary: {
                       type: 'object',
                       properties: {
+                        // ── Existing fields (production contract) ──
                         userName: { type: 'string' },
-                        cyclePhase: { type: 'string', enum: ['menstrual', 'follicular', 'fertile', 'pms', 'unknown'] },
+                        cyclePhase: {
+                          type: 'string',
+                          enum: ['menstrual', 'follicular', 'fertile', 'pms', 'late', 'contraceptive_suppressed', 'unknown'],
+                          description: 'Legacy short string. `late` and `contraceptive_suppressed` are NEW values — older clients may treat them as `unknown`.',
+                        },
                         daysUntilPeriod: { type: 'integer', nullable: true },
-                        prediction: { $ref: '#/components/schemas/CyclePrediction' },
+                        prediction: { allOf: [{ $ref: '#/components/schemas/CyclePrediction' }], nullable: true, description: 'NULL for hormonal contraceptive users (PRD Bug 3 fix b).' },
                         lastPeriod: { $ref: '#/components/schemas/PeriodLog' },
                         todaySymptoms: { $ref: '#/components/schemas/SymptomLog' },
                         personalizedTip: { type: 'string' },
@@ -1314,16 +1610,135 @@ export const swaggerSpec = {
                             motivationStyle: { type: 'string' },
                             healthFocus: { type: 'array', items: { type: 'string' } },
                             hormonalStatus: { type: 'string' },
-                            cycleLengthAvg: { type: 'integer' },
-                            periodLengthAvg: { type: 'integer' },
+                            cycleLengthAvg: { type: 'integer', nullable: true, description: 'Now nullable per PRD Rule 1 — never defaults to 28.' },
+                            periodLengthAvg: { type: 'integer', nullable: true },
                           },
                         },
+
+                        // ── NEW — PRD engine block ──
+                        engine: { $ref: '#/components/schemas/EngineContext' },
                       },
                     },
                   },
                 },
               },
             },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── PRD PHASE ENGINE ─────────────────────────────────────────────────────
+    '/period/phase': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'PRD Phase Engine — current cycle phase + classification (NEW)',
+        description: [
+          'Returns the user\'s current cycle phase per the PRD §4.3 Phase Engine. Combines calendar-based calculation (REGULAR/IRREGULAR users) and symptom-based inference (PCOS users, or when calendar data is insufficient).',
+          '',
+          '**This endpoint does not show ovulation dates for hormonal contraceptive users.** PRD Bug 3 fix (b): when `contraceptive.isHormonal=true`, the phase output is null or symptom-inferred only.',
+          '',
+          '**For PCOS users** (`userType=PCOS`): calendar-based phases are NEVER assigned (PRD Rule 5). The phase, if any, comes from `inferred.inferredPhase` based on logged symptoms.',
+          '',
+          '**Confidence levels** (PRD §4.5):',
+          '- `high` — REGULAR user with 3+ cycles logged',
+          '- `medium-high` — REGULAR user with 1-2 cycles logged',
+          '- `medium` — IRREGULAR user',
+          '- `low` — new user (0 cycles logged)',
+          '- `none` — PCOS user (no calendar predictions)',
+          '',
+          'Side effect: refreshes the cached `user_type` and `pcos_tier` columns on the user_profiles row.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: 'Current phase + full engine context',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                phase:        { $ref: '#/components/schemas/PhaseEnum' },
+                phaseSource:  { type: 'string', enum: ['calendar','symptom_inference','pcos_no_calendar','insufficient_data'] },
+                phaseDetails: { type: 'object', nullable: true },
+                userType:     { type: 'string', enum: ['REGULAR','IRREGULAR','PCOS'] },
+                pcosStatus:   { type: 'string', nullable: true, enum: ['confirmed','suspected','none'] },
+                pcosTier:     { type: 'string', enum: ['none','possible','likely','confirmed'] },
+                pcosFlags:    { type: 'array', items: { type: 'string', enum: ['A','B','C','D','E','F','G','H'] } },
+                confidence:   { type: 'string', enum: ['high','medium-high','medium','low','none'] },
+                cycleDay:     { type: 'integer', nullable: true },
+                lastPeriodStart:     { type: 'string', format: 'date', nullable: true },
+                daysSinceLastPeriod: { type: 'integer', nullable: true },
+                stats:         { $ref: '#/components/schemas/EngineStats' },
+                inferred:      { $ref: '#/components/schemas/InferredPhase' },
+                latePathway:   { $ref: '#/components/schemas/LatePeriodPathway' },
+                contraceptive: { $ref: '#/components/schemas/ContraceptiveState' },
+              },
+            } } },
+          },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    // ── PRD DAILY INSIGHT ENGINE ─────────────────────────────────────────────
+    '/period/daily-insight': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'PRD Daily Insight Engine — personalised daily card (NEW)',
+        description: [
+          'The Daily Insight Engine endpoint (PRD §5). Runs the full selection pipeline and returns one personalised insight card for the home screen.',
+          '',
+          '**Pipeline** (PRD §5.1):',
+          '1. Load user context (profile + period logs + last 90 days of symptoms)',
+          '2. Calculate phase via the Phase Engine',
+          '3. Evaluate PCOS Flags A-H and recompute pcos_tier',
+          '4. Filter the content library by phase + userType + pcosTier + contraceptive',
+          '5. Apply 14-day cooldown (cards shown to this user in the last 14 days are excluded)',
+          '6. Score by base priority + symptom matches (+3 each) + PCOS tier bonus (+2) − recency penalty',
+          '7. Return the highest-scoring card; if none qualify, fall back to the fallback library',
+          '',
+          '**Side effects:**',
+          '- Records the displayed insight in `daily_insight_history` for cooldown tracking (unless `?record=false`)',
+          '- Updates cached `user_type` and `pcos_tier` on the user_profiles row',
+          '',
+          '**PRD Bug 4 fix (c) — Late period pathway:** when the user is 7+ days late AND has logged `unprotected_sex` within the estimated fertile window of the current cycle, the pathway flag fires and the late-period-with-pregnancy-test card wins the priority round. The word "pregnant" is never used. The pathway is suppressed for PCOS users and hormonal contraceptive users per PRD §6 Scenario 6 / Bug 4 fix (d).',
+          '',
+          '**Insight content** is medically-reviewed, max 280 chars body / 60 chars title. Cultural context (food examples) references foods commonly available in Nigeria per PRD §5.2.',
+        ].join('\n'),
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: 'query', name: 'record',
+            schema: { type: 'boolean', default: true },
+            description: 'Set to `false` to peek at the insight without adding it to the cooldown history. Useful for client-side previews and tests.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Selected daily insight + engine context',
+            content: { 'application/json': { schema: {
+              type: 'object',
+              properties: {
+                insight: { $ref: '#/components/schemas/DailyInsight' },
+                context: {
+                  type: 'object',
+                  properties: {
+                    phase:        { $ref: '#/components/schemas/PhaseEnum' },
+                    phaseSource:  { type: 'string' },
+                    userType:     { type: 'string', enum: ['REGULAR','IRREGULAR','PCOS'] },
+                    pcosTier:     { type: 'string', enum: ['none','possible','likely','confirmed'] },
+                    confidence:   { type: 'string', enum: ['high','medium-high','medium','low','none'] },
+                    cycleDay:     { type: 'integer', nullable: true },
+                    contraceptive: { $ref: '#/components/schemas/ContraceptiveState' },
+                    latePathwayTriggered: { type: 'boolean' },
+                    pcosLikelyFirstSeen: {
+                      type: 'boolean',
+                      description: 'True ONLY on the request where the user\'s pcos_tier first transitions to "likely". Use this to fire the one-time "patterns worth discussing with a doctor" notification (PRD §6 Scenario 7).',
+                    },
+                  },
+                },
+              },
+            } } },
           },
           401: { $ref: '#/components/responses/Unauthorized' },
         },

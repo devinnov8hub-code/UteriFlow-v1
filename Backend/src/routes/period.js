@@ -5,18 +5,193 @@ import { validate } from '../middleware/validate.js';
 import { periodValidators } from '../validators/index.js';
 import { NotFoundError, ConflictError, AppError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import {
+  cycleStats, avgBleedLength, classifyUserType, calculatePhase,
+  inferPhaseFromSymptoms, evaluatePcosFlags, computePcosTier,
+  confidenceLevel, calculateCycleDay, isHormonalContraceptive,
+  evaluateLatePeriodPathway,
+} from '../utils/cycleEngine.js';
+import { selectDailyInsight } from '../utils/insightEngine.js';
 
 const router = express.Router();
 router.use(authenticateUser);
-function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5) {
+
+/**
+ * Load the full PRD context for a user: profile + period logs + recent
+ * symptoms + computed stats + phase + pcos_tier + contraceptive flags.
+ * Used by /summary, /daily-insight, /phase. Side-effect: keeps the cached
+ * user_type / pcos_tier columns in sync via syncCachedClassification.
+ */
+async function loadUserContext(db, userId, today = new Date()) {
+  const todayIso = today.toISOString().split('T')[0];
+
+  const [profileRes, logsRes, symptomsRes] = await Promise.all([
+    db.from('user_profiles')
+      .select('display_name, age_group, hormonal_status, pcos_status, period_regularity, ' +
+              'cycle_length_avg, period_length_avg, cycle_length_range, period_length_range, ' +
+              'last_period_start, contraceptive_type, contraceptive_changed_at, ' +
+              'user_type, pcos_tier, personality_type, motivation_style, health_focus')
+      .eq('id', userId).maybeSingle(),
+    db.from('period_logs').select('*').eq('user_id', userId).order('start_date', { ascending: true }),
+    // Last 90 days of symptom logs — enough for late-period pathway,
+    // PCOS Flag H (30-day window), and recent insight scoring.
+    db.from('period_symptoms').select('*').eq('user_id', userId)
+      .gte('logged_date', new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0])
+      .order('logged_date', { ascending: false }),
+  ]);
+
+  const profile     = profileRes.data || {};
+  const periodLogs  = logsRes.data    || [];
+  const symptomLogs = symptomsRes.data || [];
+
+  const stats = cycleStats(periodLogs);
+  const bleed = avgBleedLength(periodLogs) ?? profile.period_length_avg ?? null;
+
+  // Effective cycle length: prefer measured average (logs), fall back to
+  // onboarding estimate. NULL means "we don't know yet" — never default to 28.
+  const effectiveCycleLength = stats.avgCycleLength ?? profile.cycle_length_avg ?? null;
+
+  let daysSinceLastPeriod = null;
+  let lastPeriodStart = profile.last_period_start;
+  if (periodLogs.length > 0) {
+    const lastLog = periodLogs[periodLogs.length - 1];
+    lastPeriodStart = lastLog.start_date;
+    daysSinceLastPeriod = Math.floor((today - new Date(lastLog.start_date)) / 86400000);
+  } else if (profile.last_period_start) {
+    daysSinceLastPeriod = Math.floor((today - new Date(profile.last_period_start)) / 86400000);
+  }
+
+  // Use stored pcos_status; fall back to legacy hormonal_status mapping for
+  // users who onboarded before v5 migration.
+  const pcosStatus = profile.pcos_status
+    ?? (profile.hormonal_status === 'diagnosed' ? 'confirmed'
+       : profile.hormonal_status === 'suspected' ? 'suspected'
+       : profile.hormonal_status ? 'none' : null);
+
+  const userType = classifyUserType({
+    stats: { ...stats, avgCycleLength: effectiveCycleLength },
+    pcosStatus,
+    daysSinceLastPeriod,
+    cycleRegularity: profile.period_regularity,
+  });
+
+  const cycleDay = calculateCycleDay(lastPeriodStart, today);
+
+  const onContraceptive = isHormonalContraceptive(profile.contraceptive_type);
+  const flags = evaluatePcosFlags({
+    allSymptomLogs: symptomLogs,
+    stats: { ...stats, avgCycleLength: effectiveCycleLength },
+    periodLogs,
+    onContraceptive,
+  });
+  const pcosTier = computePcosTier({ flags, pcosStatus });
+
+  const phaseResult = calculatePhase({
+    userType, cycleDay,
+    avgCycleLength: effectiveCycleLength,
+    avgBleedLength: bleed,
+    minCycle: stats.minCycle, maxCycle: stats.maxCycle,
+  });
+
+  // Symptom-inferred phase (used for PCOS users and as override when
+  // calendar-based phase is unavailable).
+  const todayLog = symptomLogs.find(l => l.logged_date === todayIso);
+  const inferenceInput = todayLog ?? symptomLogs[0] ?? {};
+  const inferred = inferPhaseFromSymptoms({
+    symptoms:  inferenceInput.symptoms || [],
+    discharge: inferenceInput.discharge || null,
+    flowLevel: inferenceInput.flow_level || null,
+    mood:      inferenceInput.mood || [],
+  });
+
+  let currentPhase = phaseResult.phase;
+  let phaseSource  = phaseResult.source;
+  if (userType === 'PCOS' || !currentPhase) {
+    if (inferred.inferredPhase) {
+      currentPhase = inferred.inferredPhase;
+      phaseSource  = 'symptom_inference';
+    }
+  }
+
+  // Late-period pregnancy pathway (Bug 4 fix c)
+  const latePathway = evaluateLatePeriodPathway({
+    userType, onContraceptive, cycleDay,
+    avgCycleLength: effectiveCycleLength,
+    recentSymptomLogs: symptomLogs.filter(l => {
+      const days = Math.floor((today - new Date(l.logged_date)) / 86400000);
+      return days >= 0 && days <= 30;
+    }),
+    lastPeriodStart,
+  });
+
+  const confidence = confidenceLevel({
+    userType,
+    cyclesLogged: stats.cyclesUsed,
+    pcosStatus,
+  });
+
+  return {
+    profile,
+    pcosStatus,
+    userType,
+    contraceptive: {
+      type: profile.contraceptive_type ?? null,
+      isHormonal: onContraceptive,
+      changedAt: profile.contraceptive_changed_at ?? null,
+    },
+    cycleDay,
+    lastPeriodStart,
+    daysSinceLastPeriod,
+    stats: { ...stats, avgCycleLength: effectiveCycleLength, avgBleedLength: bleed },
+    phase: currentPhase,
+    phaseDetails: phaseResult.details ?? null,
+    phaseSource,
+    inferred,
+    pcosFlags: flags,
+    pcosTier,
+    latePathway,
+    confidence,
+    todaySymptoms: todayLog?.symptoms ?? [],
+    recentSymptomLogs: symptomLogs,
+  };
+}
+
+/**
+ * Persist cached user_type and pcos_tier back onto user_profiles.
+ * Best-effort — failures are logged but never raised.
+ */
+async function syncCachedClassification(db, userId, ctx) {
+  try {
+    const updates = {};
+    if (ctx.userType && ctx.userType !== ctx.profile.user_type) {
+      updates.user_type = ctx.userType;
+    }
+    if (ctx.pcosTier && ctx.pcosTier !== ctx.profile.pcos_tier) {
+      updates.pcos_tier = ctx.pcosTier;
+    }
+    if (Object.keys(updates).length > 0) {
+      await db.from('user_profiles').update(updates).eq('id', userId);
+    }
+  } catch (e) {
+    console.warn('[syncCachedClassification] failed:', e.message);
+  }
+}
+// PRD Rule 1: never assume a 28-day cycle. Required args, no defaults.
+// Callers (refreshPredictions) must supply real values from logs or onboarding.
+// Throws if cycleLengthAvg is missing — the bug here is upstream, fail loud.
+function computePredictions(lastStart, cycleLengthAvg, periodLengthAvg) {
+  if (!lastStart || !cycleLengthAvg) {
+    throw new Error('computePredictions requires lastStart and cycleLengthAvg');
+  }
+  const safePeriodLength = periodLengthAvg ?? 5; // affects predicted_end only, not ovulation math
   const start = new Date(lastStart);
   const predictedStart = new Date(start);
   predictedStart.setDate(start.getDate() + cycleLengthAvg);
 
   const predictedEnd = new Date(predictedStart);
-  predictedEnd.setDate(predictedStart.getDate() + periodLengthAvg - 1);
+  predictedEnd.setDate(predictedStart.getDate() + safePeriodLength - 1);
 
-  
+  // PRD Rule 2: ovulation = avg_cycle_length - 14 (NOT day 14)
   const ovulation = new Date(predictedStart);
   ovulation.setDate(predictedStart.getDate() - 14);
 
@@ -26,7 +201,7 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
   fertileEnd.setDate(ovulation.getDate() + 1);
 
   return {
-    predicted_start:      predictedStart.toISOString().split('T')[0],                                                                                                                                                                                                                                                                                                                                                                                                                                               
+    predicted_start:      predictedStart.toISOString().split('T')[0],
     predicted_end:        predictedEnd.toISOString().split('T')[0],
     ovulation_date:       ovulation.toISOString().split('T')[0],
     fertile_window_start: fertileStart.toISOString().split('T')[0],
@@ -35,17 +210,50 @@ function computePredictions(lastStart, cycleLengthAvg = 28, periodLengthAvg = 5)
 }
 
 async function refreshPredictions(db, userId) {
-  
+  // Pull the contraceptive type along with cycle averages so we can suppress
+  // prediction generation for users on hormonal birth control (PRD Bug 3 fix b).
   const { data: profile } = await db
     .from('user_profiles')
-    .select('cycle_length_avg, period_length_avg')
+    .select('cycle_length_avg, period_length_avg, contraceptive_type')
     .eq('id', userId)
     .maybeSingle();
 
-  const cycleLengthAvg  = profile?.cycle_length_avg  ?? 28;
-  const periodLengthAvg = profile?.period_length_avg ?? 5;
+  // PRD Bug 3 fix (b): no ovulation/fertile predictions for hormonal users
+  if (isHormonalContraceptive(profile?.contraceptive_type)) {
+    // Mark any stale predictions as not current and bail out
+    await db
+      .from('cycle_predictions')
+      .update({ is_current: false })
+      .eq('user_id', userId)
+      .eq('is_current', true);
+    return null;
+  }
 
-  
+  // Prefer the measured average from logs over the onboarding estimate.
+  // This is the PRD's "Cycle Length Formula" — average of last 3-6 cycles.
+  const { data: allLogs } = await db
+    .from('period_logs')
+    .select('start_date')
+    .eq('user_id', userId)
+    .order('start_date', { ascending: true });
+
+  const measuredStats = cycleStats(allLogs || []);
+  const cycleLengthAvg  = measuredStats.avgCycleLength ?? profile?.cycle_length_avg ?? null;
+  const periodLengthAvg = profile?.period_length_avg ?? null;
+
+  // PRD Rule 1: never assume 28 days. If we have neither measured nor onboarding
+  // data, do NOT generate a prediction — the engine will report low confidence
+  // and the UI should show an "estimate based on limited data" message instead.
+  if (!cycleLengthAvg) {
+    return null;
+  }
+
+  // periodLengthAvg can stay null — computePredictions accepts it and falls
+  // back to the legacy default (which only affects predicted_end, not the
+  // ovulation/fertile math). Keeping the legacy fallback here means existing
+  // production responses don't suddenly gain null predicted_end fields.
+  const safePeriodLength = periodLengthAvg ?? 5;
+
   const { data: lastLog } = await db
     .from('period_logs')
     .select('start_date')
@@ -56,16 +264,14 @@ async function refreshPredictions(db, userId) {
 
   if (!lastLog) return null;
 
-  const pred = computePredictions(lastLog.start_date, cycleLengthAvg, periodLengthAvg);
+  const pred = computePredictions(lastLog.start_date, cycleLengthAvg, safePeriodLength);
 
-  
   await db
     .from('cycle_predictions')
     .update({ is_current: false })
     .eq('user_id', userId)
     .eq('is_current', true);
 
-  
   const { data } = await db
     .from('cycle_predictions')
     .insert({ user_id: userId, ...pred, is_current: true })
@@ -206,9 +412,22 @@ router.delete('/log/:id', periodValidators.logDelete, validate, async (req, res,
 // Creates a new symptom log entry for a given date.
 // If the user already has an entry for that date, it UPDATES it instead of
 // creating a duplicate (upsert behaviour — avoids "no symptom ID" confusion).
+//
+// PRD Bug 3 fix (c) — Contraceptive change pathway:
+//   When the symptoms array contains 'started_changed_contraceptive' AND
+//   the request also includes a `contraceptiveType` field, we update the
+//   user's profile in the SAME request and re-run the contraceptive routing.
+//   This mirrors how Flo handles contraceptive tracking: the change is logged
+//   as part of the daily symptom checklist with a one-tap follow-up, not a
+//   separate clinical settings screen.
+//
+// PRD Bug 4 fix — Sexual activity:
+//   'protected_sex' and 'unprotected_sex' are now part of ALLOWED_SYMPTOMS.
+//   They flow through this same endpoint with no special handling here —
+//   the late-period pathway in /daily-insight reads them retrospectively.
 router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res, next) => {
   try {
-    const { loggedDate, logId, symptoms, flowLevel, discharge, mood, painLevel, notes } = req.body;
+    const { loggedDate, logId, symptoms, flowLevel, discharge, mood, painLevel, notes, contraceptiveType } = req.body;
     const userId     = req.user.id;
     const targetDate = loggedDate ?? new Date().toISOString().split('T')[0];
 
@@ -258,7 +477,38 @@ router.post('/symptoms', periodValidators.symptomLog, validate, async (req, res,
     }
 
     if (error) throw error;
-    return success(res, { message: 'Symptoms logged successfully', symptomLog: data }, existing ? 200 : 201);
+
+    // PRD Bug 3 fix (c): contraceptive change side-effect
+    // If the user logged the contraceptive-change item AND told us the new method,
+    // update the profile so the engine re-routes immediately. We don't enforce
+    // that contraceptiveType be present (the user may want to log just the change
+    // event without committing to a method right now).
+    let contraceptiveUpdated = false;
+    if (Array.isArray(symptoms) && symptoms.includes('started_changed_contraceptive') && contraceptiveType) {
+      const { error: profileErr } = await req.supabase
+        .from('user_profiles')
+        .update({
+          contraceptive_type:       contraceptiveType,
+          contraceptive_changed_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+      if (!profileErr) {
+        contraceptiveUpdated = true;
+      } else {
+        console.warn('[symptoms] contraceptive update failed:', profileErr.message);
+      }
+    }
+
+    return success(res, {
+      message: 'Symptoms logged successfully',
+      symptomLog: data,
+      ...(contraceptiveUpdated ? { contraceptiveUpdated: true, contraceptiveType } : {}),
+      // Hint for the frontend so it knows to prompt the user for the new method
+      // when the change item was logged WITHOUT a contraceptiveType in this request.
+      ...(Array.isArray(symptoms) && symptoms.includes('started_changed_contraceptive') && !contraceptiveType
+        ? { promptContraceptiveType: true }
+        : {}),
+    }, existing ? 200 : 201);
   } catch (error) { next(error); }
 });
 
@@ -304,9 +554,36 @@ router.get('/symptoms/today', async (req, res, next) => {
 });
 
 
+// GET /period/prediction
+//
+// Returns the user's current cycle prediction (next period, ovulation, fertile
+// window). Triggers a recompute if no current prediction is cached.
+//
+// PRD Bug 3 fix (b): for users on hormonal contraception, returns
+// `prediction: null` plus a `suppressedReason` flag so the frontend can render
+// the contraceptive-aware UI instead of a fertility window. Their natural
+// cycle is chemically suppressed and predicting ovulation would be incorrect
+// and potentially misleading.
 router.get('/prediction', async (req, res, next) => {
   try {
     const userId = req.user.id;
+
+    // Check contraceptive status first — the engine should never compute or
+    // return predictions for hormonal contraceptive users.
+    const { data: profile } = await req.supabase
+      .from('user_profiles')
+      .select('contraceptive_type')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (isHormonalContraceptive(profile?.contraceptive_type)) {
+      return success(res, {
+        prediction: null,
+        suppressed: true,
+        suppressedReason: 'hormonal_contraceptive',
+        message: 'Ovulation and fertile window predictions are not shown for users on hormonal contraception.',
+      });
+    }
 
     const { data: prediction, error } = await req.supabase
       .from('cycle_predictions')
@@ -319,7 +596,6 @@ router.get('/prediction', async (req, res, next) => {
     if (error) throw error;
 
     if (!prediction) {
-      
       const computed = await refreshPredictions(req.supabase, userId);
       return success(res, { prediction: computed ?? null });
     }
@@ -329,29 +605,42 @@ router.get('/prediction', async (req, res, next) => {
 });
 
 
+// GET /period/summary
+//
+// Home-screen dashboard payload. Preserves all existing fields for backward
+// compatibility with production clients, AND adds new PRD-engine fields under
+// `engine` so newer clients can use the richer phase / pcos_tier / contraceptive
+// state without breaking older app builds.
+//
+// PRD Bug 3 fix (b): hormonal contraceptive users get `prediction: null` and
+// `cyclePhase: 'contraceptive_suppressed'`. Their natural cycle is chemically
+// suppressed, so showing predicted ovulation or fertile window is incorrect.
 router.get('/summary', async (req, res, next) => {
   try {
     const userId = req.user.id;
     const today  = new Date().toISOString().split('T')[0];
+    const todayDate = new Date();
 
-  
-    const { data: profile } = await req.supabase
-      .from('user_profiles')
-      .select('display_name, personality_type, motivation_style, health_focus, hormonal_status, cycle_length_avg, period_length_avg')
-      .eq('id', userId)
-      .maybeSingle();
+    const ctx = await loadUserContext(req.supabase, userId, todayDate);
+    // Side effect: refresh cached user_type/pcos_tier on the profile row.
+    await syncCachedClassification(req.supabase, userId, ctx);
 
-   
-    const { data: prediction } = await req.supabase
-      .from('cycle_predictions')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_current', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const profile = ctx.profile;
 
-  
+    // Existing fields kept for backward compatibility ─────────────
+    let prediction = null;
+    if (!ctx.contraceptive.isHormonal) {
+      const { data: pred } = await req.supabase
+        .from('cycle_predictions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_current', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      prediction = pred ?? null;
+    }
+
     const { data: lastLog } = await req.supabase
       .from('period_logs')
       .select('*')
@@ -360,7 +649,6 @@ router.get('/summary', async (req, res, next) => {
       .limit(1)
       .maybeSingle();
 
-  
     const { data: todaySymptoms } = await req.supabase
       .from('period_symptoms')
       .select('*')
@@ -368,37 +656,32 @@ router.get('/summary', async (req, res, next) => {
       .eq('logged_date', today)
       .maybeSingle();
 
-  
+    // Map the PRD phase enum back to the legacy short strings the existing
+    // frontend expects ('menstrual'|'fertile'|'pms'|'follicular'|'unknown').
+    // For new clients, the canonical PRD phase is exposed under engine.phase.
     let cyclePhase = 'unknown';
     let daysUntilPeriod = null;
 
-    if (prediction) {
-      const predStart  = new Date(prediction.predicted_start);
-      const fertStart  = new Date(prediction.fertile_window_start);
-      const fertEnd    = new Date(prediction.fertile_window_end);
-      const todayDate  = new Date(today);
-
-      const msPerDay = 86400000;
-      daysUntilPeriod = Math.round((predStart - todayDate) / msPerDay);
-
-      if (lastLog) {
-        const logStart     = new Date(lastLog.start_date);
-        const daysSinceLog = Math.round((todayDate - logStart) / msPerDay);
-        const periodLength = profile?.period_length_avg ?? 5;
-
-        if (daysSinceLog >= 0 && daysSinceLog < periodLength) {
-          cyclePhase = 'menstrual';
-        } else if (todayDate >= fertStart && todayDate <= fertEnd) {
-          cyclePhase = 'fertile';
-        } else if (daysUntilPeriod <= 7 && daysUntilPeriod >= 0) {
-          cyclePhase = 'pms';
-        } else {
-          cyclePhase = 'follicular';
-        }
+    if (ctx.contraceptive.isHormonal) {
+      cyclePhase = 'contraceptive_suppressed';
+    } else if (ctx.phase) {
+      switch (ctx.phase) {
+        case 'MENSTRUAL':              cyclePhase = 'menstrual';   break;
+        case 'OVULATION':
+        case 'APPROACHING_OVULATION':  cyclePhase = 'fertile';     break;
+        case 'LUTEAL':                 cyclePhase = 'pms';         break;
+        case 'FOLLICULAR':             cyclePhase = 'follicular';  break;
+        case 'LATE':                   cyclePhase = 'late';        break;
+        case 'LATE_MENSTRUAL_OR_FOLLICULAR': cyclePhase = 'follicular'; break;
+        default:                       cyclePhase = 'unknown';
       }
     }
 
-   
+    if (prediction && !ctx.contraceptive.isHormonal) {
+      const predStart  = new Date(prediction.predicted_start);
+      daysUntilPeriod  = Math.round((predStart - todayDate) / 86400000);
+    }
+
     const tips = {
       cycle_sharer:      'Share how you\'re feeling in the community today 💜',
       health_optimizer:  'Track today\'s symptoms for better cycle insights 📊',
@@ -409,6 +692,7 @@ router.get('/summary', async (req, res, next) => {
 
     return success(res, {
       summary: {
+        // ── Existing fields (production contract — DO NOT REMOVE) ──
         userName:         profile?.display_name,
         cyclePhase,
         daysUntilPeriod,
@@ -421,8 +705,40 @@ router.get('/summary', async (req, res, next) => {
           motivationStyle:  profile?.motivation_style,
           healthFocus:      profile?.health_focus,
           hormonalStatus:   profile?.hormonal_status,
-          cycleLengthAvg:   profile?.cycle_length_avg ?? 28,
-          periodLengthAvg:  profile?.period_length_avg ?? 5,
+          // NOTE: these two are nullable per PRD; we no longer fabricate 28/5
+          // when the user hasn't told us. Old clients should stop relying on
+          // these defaults and read from `engine` instead.
+          cycleLengthAvg:   profile?.cycle_length_avg ?? null,
+          periodLengthAvg:  profile?.period_length_avg ?? null,
+        },
+
+        // ── New PRD engine fields (additive for new clients) ─────
+        engine: {
+          phase:            ctx.phase,           // canonical PRD phase enum
+          phaseSource:      ctx.phaseSource,     // 'calendar'|'symptom_inference'|'pcos_no_calendar'|'insufficient_data'
+          phaseDetails:     ctx.phaseDetails,    // ovulation_day, fertile_window_start/end, etc.
+          userType:         ctx.userType,        // REGULAR|IRREGULAR|PCOS
+          pcosStatus:       ctx.pcosStatus,      // confirmed|suspected|none
+          pcosTier:         ctx.pcosTier,        // none|possible|likely|confirmed
+          pcosFlags:        ctx.pcosFlags,       // ['A','E','H',...]
+          confidence:       ctx.confidence,      // high|medium-high|medium|low|none
+          cycleDay:         ctx.cycleDay,
+          daysSinceLastPeriod: ctx.daysSinceLastPeriod,
+          stats: {
+            avgCycleLength: ctx.stats.avgCycleLength,
+            avgBleedLength: ctx.stats.avgBleedLength,
+            stdDev:         ctx.stats.stdDev,
+            cyclesUsed:     ctx.stats.cyclesUsed,
+            minCycle:       ctx.stats.minCycle,
+            maxCycle:       ctx.stats.maxCycle,
+          },
+          contraceptive: {
+            type:       ctx.contraceptive.type,
+            isHormonal: ctx.contraceptive.isHormonal,
+            // True when the engine has suppressed ovulation/fertile content
+            ovulationSuppressed: ctx.contraceptive.isHormonal,
+          },
+          latePeriodPathway: ctx.latePathway,    // { triggered, reason, daysLate?, fertileWindow? }
         },
       },
     });
@@ -606,5 +922,181 @@ router.put('/symptoms/:id', async (req, res, next) => {
     return success(res, { message: 'Symptoms updated successfully', symptomLog: data });
   } catch (error) { next(error); }
 });
+
+
+// ═══════════════════════════════════════════════════════════════════
+// PRD Phase Engine + Daily Insight Engine endpoints
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /period/phase
+//
+// Returns the user's current cycle phase per the PRD Phase Engine. Combines
+// calendar-based calculation (REGULAR/IRREGULAR users) and symptom-based
+// inference (PCOS users, or when calendar data is insufficient).
+//
+// Response includes:
+//   - phase:        canonical PRD enum (MENSTRUAL|FOLLICULAR|OVULATION|LUTEAL|LATE|null)
+//   - phaseSource:  'calendar' | 'symptom_inference' | 'pcos_no_calendar' | 'insufficient_data'
+//   - userType:     REGULAR | IRREGULAR | PCOS
+//   - confidence:   high | medium-high | medium | low | none
+//   - cycleDay:     1-indexed day in the current cycle (null if no period logged yet)
+//   - stats:        avg_cycle_length, avg_bleed_length, std_dev, min/max, cycles used
+//   - phaseDetails: ovulation_day, fertile_window_start/end (when known)
+//   - inferred:     symptom-inferred phase + signals
+//   - latePathway:  late-period + unprotected sex pathway state
+//   - contraceptive: { type, isHormonal, ovulationSuppressed }
+//
+// PRD Bug 3 fix (b): when isHormonal=true, calendar phases are NOT shown — the
+// engine returns null phase (or symptom-inferred phase) and the client should
+// render contraceptive-aware UI instead.
+router.get('/phase', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const ctx = await loadUserContext(req.supabase, userId, new Date());
+    await syncCachedClassification(req.supabase, userId, ctx);
+
+    return success(res, {
+      phase:        ctx.phase,
+      phaseSource:  ctx.phaseSource,
+      phaseDetails: ctx.phaseDetails,
+      userType:     ctx.userType,
+      pcosStatus:   ctx.pcosStatus,
+      pcosTier:     ctx.pcosTier,
+      pcosFlags:    ctx.pcosFlags,
+      confidence:   ctx.confidence,
+      cycleDay:     ctx.cycleDay,
+      lastPeriodStart:     ctx.lastPeriodStart,
+      daysSinceLastPeriod: ctx.daysSinceLastPeriod,
+      stats: {
+        avgCycleLength: ctx.stats.avgCycleLength,
+        avgBleedLength: ctx.stats.avgBleedLength,
+        stdDev:         ctx.stats.stdDev,
+        cyclesUsed:     ctx.stats.cyclesUsed,
+        minCycle:       ctx.stats.minCycle,
+        maxCycle:       ctx.stats.maxCycle,
+      },
+      inferred:      ctx.inferred,
+      latePathway:   ctx.latePathway,
+      contraceptive: ctx.contraceptive,
+    });
+  } catch (error) { next(error); }
+});
+
+
+// GET /period/daily-insight
+//
+// The Daily Insight Engine endpoint (PRD §5). Runs the full selection pipeline:
+//   1. Load user context (profile + logs + symptoms)
+//   2. Calculate phase
+//   3. Evaluate PCOS flags + tier
+//   4. Filter content library by phase + userType + pcosTier + contraceptive
+//   5. Apply 14-day cooldown
+//   6. Score by priority + symptom matches + recency penalty
+//   7. Return the highest-scoring card (or fallback)
+//
+// Side effects:
+//   - Records the displayed insight in `daily_insight_history` for cooldown tracking
+//   - Updates cached `user_type` and `pcos_tier` on user_profiles
+//
+// Query params:
+//   - record (boolean, default true): set to false to peek at the insight without
+//     adding it to the cooldown history (useful for client-side previews/testing)
+router.get('/daily-insight', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const recordHistory = req.query.record !== 'false';
+    const today = new Date();
+    const todayIso = today.toISOString().split('T')[0];
+
+    const ctx = await loadUserContext(req.supabase, userId, today);
+    await syncCachedClassification(req.supabase, userId, ctx);
+
+    // Pull recent insight history for the cooldown filter (last 14 days is enough,
+    // but we fetch 21 to give the recency-penalty calculator some headroom).
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - 21);
+    const { data: history } = await req.supabase
+      .from('daily_insight_history')
+      .select('insight_key, shown_date')
+      .eq('user_id', userId)
+      .gte('shown_date', cutoff.toISOString().split('T')[0]);
+
+    // Pathway flags drive priority — late-period + unprotected sex flips the
+    // late_with_unprotected_sex insight into the top slot.
+    const pathwayFlags = [];
+    if (ctx.latePathway?.triggered) {
+      pathwayFlags.push('late_period_pregnancy_pathway');
+    }
+
+    const insight = selectDailyInsight({
+      userType:      ctx.userType,
+      currentPhase:  ctx.phase,
+      pcosTier:      ctx.pcosTier,
+      contraceptive: ctx.contraceptive,
+      todaySymptoms: ctx.todaySymptoms,
+      recentlyShown: history ?? [],
+      pathwayFlags,
+    });
+
+    // Record the display so future requests respect the cooldown. We use upsert
+    // semantics by checking for an existing row for THIS card on TODAY first —
+    // multiple loads of the same day shouldn't pile up duplicate history rows.
+    if (recordHistory && insight && !insight.isFallback) {
+      try {
+        const { data: existingHistory } = await req.supabase
+          .from('daily_insight_history')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('insight_key', insight.key)
+          .eq('shown_date', todayIso)
+          .maybeSingle();
+
+        if (!existingHistory) {
+          await req.supabase.from('daily_insight_history').insert({
+            user_id:     userId,
+            insight_key: insight.key,
+            shown_date:  todayIso,
+            phase:       ctx.phase,
+            pcos_tier:   ctx.pcosTier,
+          });
+        }
+      } catch (histErr) {
+        // Non-fatal — if the table doesn't exist yet (v5 migration not run),
+        // we still want to serve the insight. Log and continue.
+        console.warn('[daily-insight] history record failed:', histErr.message);
+      }
+    }
+
+    return success(res, {
+      insight: {
+        key:          insight.key,
+        title:        insight.title,
+        body:         insight.body,
+        actionLink:   insight.actionLink ?? null,
+        isFallback:   insight.isFallback,
+        score:        insight.score,
+        source:       insight.source,
+      },
+      context: {
+        phase:        ctx.phase,
+        phaseSource:  ctx.phaseSource,
+        userType:     ctx.userType,
+        pcosTier:     ctx.pcosTier,
+        confidence:   ctx.confidence,
+        cycleDay:     ctx.cycleDay,
+        contraceptive: {
+          type:               ctx.contraceptive.type,
+          isHormonal:         ctx.contraceptive.isHormonal,
+          ovulationSuppressed: ctx.contraceptive.isHormonal,
+        },
+        latePathwayTriggered: ctx.latePathway?.triggered ?? false,
+        // For UI surfaces that want to show "your patterns suggest PCOS, consider
+        // talking to a doctor" — only fire ONCE when the tier first becomes 'likely'.
+        pcosLikelyFirstSeen: ctx.pcosTier === 'likely' && ctx.profile.pcos_tier !== 'likely',
+      },
+    });
+  } catch (error) { next(error); }
+});
+
 
 export default router;
