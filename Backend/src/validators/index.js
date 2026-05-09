@@ -129,11 +129,32 @@ export const ALLOWED_SYMPTOMS = [
   // PRD Bug 4 — sexual activity items (logged same as any other symptom)
   'protected_sex',
   'unprotected_sex',
+  // Frontend "Sexual Activity" section (Cycle Day checklist) — additional
+  // items that the daily-checklist UI surfaces alongside protected/unprotected
+  // sex. Logged exactly like any other symptom (no engine side-effects).
+  // Late-period pathway in cycleEngine.js still keys off `unprotected_sex`
+  // only; these new items do not change engine routing.
+  'pain_during_sex',
+  'bleeding_after_sex',
+  'spotting_after_sex',
+  'low_libido',
 
   // PRD Bug 3 fix (c) — contraceptive change item; logging this also lets
   // the client send `contraceptiveType` in the same request to update the
   // user profile and re-route the engine in one step.
   'started_changed_contraceptive',
+
+  // Frontend "Contraceptive Use" section (Cycle Day checklist) — daily
+  // logging of which contraceptive method the user used today. These are
+  // SEPARATE from the onboarding clinical `contraceptive_type` field on
+  // user_profiles (which controls cycle-engine suppression). These items
+  // are simple per-day tags and do NOT update the profile or trigger
+  // hormonal-suppression routing — that pathway is reserved for
+  // `started_changed_contraceptive` + `contraceptiveType` body field.
+  'birth_control_pill',
+  'morning_after_pill',
+  'iud_implant',
+  'other_medication',
 ];
 
 

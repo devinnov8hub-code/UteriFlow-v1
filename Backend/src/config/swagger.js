@@ -1,4 +1,3 @@
-
 const servers = [
   {
     url: '/api/v1',
@@ -124,9 +123,14 @@ export const swaggerSpec = {
                 'excess_hair','hair_thinning','weight_gain_difficulty','skin_darkening',
                 // PRD Bug 4 — sexual activity (logged exactly like cramps/fatigue)
                 'protected_sex','unprotected_sex',
+                // Frontend Cycle Day "Sexual Activity" section — additional checklist items
+                'pain_during_sex','bleeding_after_sex','spotting_after_sex','low_libido',
                 // PRD Bug 3 fix (c) — contraceptive change item; pair with
                 // contraceptiveType in the request body to update profile in one call
                 'started_changed_contraceptive',
+                // Frontend Cycle Day "Contraceptive Use" section — daily logging items.
+                // SEPARATE from onboarding `contraceptive_type` (clinical / engine routing).
+                'birth_control_pill','morning_after_pill','iud_implant','other_medication',
               ],
             },
           },
@@ -1407,6 +1411,8 @@ export const swaggerSpec = {
           '',
           '**PRD Bug 4 fix — Sexual activity:** `protected_sex` and `unprotected_sex` are now valid `symptoms[]` items. They are logged exactly like cramps or fatigue (no separate clinical screen, matching the Flo UX). The late-period pathway uses these retrospectively when computing daily insights.',
           '',
+          '**Frontend Cycle Day checklist — additional items:** the daily checklist UI also surfaces `pain_during_sex`, `bleeding_after_sex`, `spotting_after_sex`, `low_libido` under "Sexual Activity", and `birth_control_pill`, `morning_after_pill`, `iud_implant`, `other_medication` under "Contraceptive Use". These are stored as plain symptom tags for the day. **They do NOT update the user profile `contraceptive_type` field and do NOT trigger hormonal-suppression routing** — that pathway is reserved for the existing `started_changed_contraceptive` + `contraceptiveType` body field flow. The late-period pathway also continues to key off `unprotected_sex` only.',
+          '',
           '**PRD Bug 3 fix (c) — Contraceptive change pathway:** when `symptoms[]` includes `started_changed_contraceptive`, the request body may also include a top-level `contraceptiveType` field. If both are present, the user\'s profile contraceptive_type is updated in the same request and the engine re-routes immediately. If `contraceptiveType` is omitted, the response includes `promptContraceptiveType: true` so the frontend can ask which method.',
         ].join('\n'),
         security: [{ bearerAuth: [] }],
@@ -1433,7 +1439,11 @@ export const swaggerSpec = {
                         'high_libido',
                         'excess_hair','hair_thinning','weight_gain_difficulty','skin_darkening',
                         'protected_sex','unprotected_sex',
+                        // Frontend Cycle Day "Sexual Activity" section
+                        'pain_during_sex','bleeding_after_sex','spotting_after_sex','low_libido',
                         'started_changed_contraceptive',
+                        // Frontend Cycle Day "Contraceptive Use" section (daily checklist)
+                        'birth_control_pill','morning_after_pill','iud_implant','other_medication',
                       ],
                     },
                     example: ['cramps', 'fatigue'],
