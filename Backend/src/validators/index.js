@@ -153,7 +153,7 @@ export const ALLOWED_SYMPTOMS = [
   // `started_changed_contraceptive` + `contraceptiveType` body field.
   'birth_control_pill',
   'morning_after_pill',
-  'iud_implant',
+  'implant',
   'other_medication',
 ];
 
@@ -174,6 +174,19 @@ export const periodValidators = {
   pagination: [
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt().withMessage('Limit must be between 1 and 100'),
     query('offset').optional().isInt({ min: 0 }).toInt().withMessage('Offset must be a non-negative integer'),
+  ],
+  // GET /period/symptoms/:date — date param validator
+  // Accepts an ISO date string (YYYY-MM-DD); future dates are rejected because
+  // a user cannot have logged how they felt on a day that hasn't happened yet.
+  byDate: [
+    param('date').isISO8601({ strict: true }).withMessage('date must be a valid ISO 8601 date (YYYY-MM-DD)')
+      .custom((value) => {
+        const todayIso = new Date().toISOString().split('T')[0];
+        if (value > todayIso) {
+          throw new Error('date cannot be in the future');
+        }
+        return true;
+      }),
   ],
   symptomLog: [
     body('loggedDate').optional().isISO8601().toDate().withMessage('loggedDate must be a valid date')

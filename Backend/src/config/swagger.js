@@ -130,7 +130,7 @@ export const swaggerSpec = {
                 'started_changed_contraceptive',
                 // Frontend Cycle Day "Contraceptive Use" section — daily logging items.
                 // SEPARATE from onboarding `contraceptive_type` (clinical / engine routing).
-                'birth_control_pill','morning_after_pill','iud_implant','other_medication',
+                'birth_control_pill','morning_after_pill','implant','other_medication',
               ],
             },
           },
@@ -1411,7 +1411,7 @@ export const swaggerSpec = {
           '',
           '**PRD Bug 4 fix — Sexual activity:** `protected_sex` and `unprotected_sex` are now valid `symptoms[]` items. They are logged exactly like cramps or fatigue (no separate clinical screen, matching the Flo UX). The late-period pathway uses these retrospectively when computing daily insights.',
           '',
-          '**Frontend Cycle Day checklist — additional items:** the daily checklist UI also surfaces `pain_during_sex`, `bleeding_after_sex`, `spotting_after_sex`, `low_libido` under "Sexual Activity", and `birth_control_pill`, `morning_after_pill`, `iud_implant`, `other_medication` under "Contraceptive Use". These are stored as plain symptom tags for the day. **They do NOT update the user profile `contraceptive_type` field and do NOT trigger hormonal-suppression routing** — that pathway is reserved for the existing `started_changed_contraceptive` + `contraceptiveType` body field flow. The late-period pathway also continues to key off `unprotected_sex` only.',
+          '**Frontend Cycle Day checklist — additional items:** the daily checklist UI also surfaces `pain_during_sex`, `bleeding_after_sex`, `spotting_after_sex`, `low_libido` under "Sexual Activity", and `birth_control_pill`, `morning_after_pill`, `implant`, `other_medication` under "Contraceptive Use". These are stored as plain symptom tags for the day. **They do NOT update the user profile `contraceptive_type` field and do NOT trigger hormonal-suppression routing** — that pathway is reserved for the existing `started_changed_contraceptive` + `contraceptiveType` body field flow. The late-period pathway also continues to key off `unprotected_sex` only.',
           '',
           '**PRD Bug 3 fix (c) — Contraceptive change pathway:** when `symptoms[]` includes `started_changed_contraceptive`, the request body may also include a top-level `contraceptiveType` field. If both are present, the user\'s profile contraceptive_type is updated in the same request and the engine re-routes immediately. If `contraceptiveType` is omitted, the response includes `promptContraceptiveType: true` so the frontend can ask which method.',
         ].join('\n'),
@@ -1443,7 +1443,7 @@ export const swaggerSpec = {
                         'pain_during_sex','bleeding_after_sex','spotting_after_sex','low_libido',
                         'started_changed_contraceptive',
                         // Frontend Cycle Day "Contraceptive Use" section (daily checklist)
-                        'birth_control_pill','morning_after_pill','iud_implant','other_medication',
+                        'birth_control_pill','morning_after_pill','implant','other_medication',
                       ],
                     },
                     example: ['cramps', 'fatigue'],
@@ -1602,7 +1602,7 @@ export const swaggerSpec = {
                       type: 'object',
                       properties: {
                         // ── Existing fields (production contract) ──
-                        userName: { type: 'string' },
+                        display_name: { type: 'string', nullable: true, description: 'User\'s display name (snake_case to match the underlying profile column and the rest of the API).' },
                         cyclePhase: {
                           type: 'string',
                           enum: ['menstrual', 'follicular', 'fertile', 'pms', 'late', 'contraceptive_suppressed', 'unknown'],
@@ -2173,6 +2173,45 @@ export const swaggerSpec = {
               },
             },
           },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+
+    '/period/symptoms/{date}': {
+      get: {
+        tags: ['Period Tracking'],
+        summary: 'Get the symptom entry for a specific date',
+        description:
+          'Returns the symptom log for the given date (ISO 8601 `YYYY-MM-DD`), or null if none logged for that day. Never returns 404. ' +
+          'Mirrors `GET /period/symptoms/today` but accepts any past date — used when the frontend navigates to a previous day on the Cycle Day calendar and needs to pre-fill the checklist with what was already logged. ' +
+          'Future dates are rejected (400).',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            in: 'path',
+            name: 'date',
+            required: true,
+            schema: { type: 'string', format: 'date', example: '2026-04-10' },
+            description: 'ISO 8601 date (YYYY-MM-DD). Must not be in the future.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Symptom entry for the date, or null if none logged',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    symptomLog: { nullable: true, allOf: [{ $ref: '#/components/schemas/SymptomLog' }] },
+                    date: { type: 'string', format: 'date', example: '2026-04-10' },
+                  },
+                },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/ValidationError' },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
       },

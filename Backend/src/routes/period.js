@@ -554,6 +554,32 @@ router.get('/symptoms/today', async (req, res, next) => {
 });
 
 
+// GET /period/symptoms/:date — fetch the symptom entry for a specific date.
+//
+// Mirrors GET /period/symptoms/today but for any past date the user wants to
+// look up (e.g. when the frontend navigates to a previous day on the Cycle Day
+// calendar and needs to pre-fill the checklist with what was already logged).
+//
+// `:date` must be an ISO 8601 date string (YYYY-MM-DD). Future dates are rejected.
+// Returns null in `symptomLog` if no entry exists for that date — never returns 404.
+router.get('/symptoms/:date', periodValidators.byDate, validate, async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { date } = req.params;
+
+    const { data, error } = await req.supabase
+      .from('period_symptoms')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('logged_date', date)
+      .maybeSingle();
+    if (error) throw error;
+
+    return success(res, { symptomLog: data ?? null, date });
+  } catch (error) { next(error); }
+});
+
+
 // GET /period/prediction
 //
 // Returns the user's current cycle prediction (next period, ovulation, fertile
@@ -693,7 +719,10 @@ router.get('/summary', async (req, res, next) => {
     return success(res, {
       summary: {
         // ── Existing fields (production contract — DO NOT REMOVE) ──
-        userName:         profile?.display_name,
+        // Keep snake_case `display_name` here (NOT camelCase `userName`) — the
+        // rest of the API exposes profile fields with the same name as the
+        // underlying DB column, and the frontend reads `display_name`.
+        display_name:     profile?.display_name,
         cyclePhase,
         daysUntilPeriod,
         prediction,

@@ -252,7 +252,7 @@
  *                 summary:
  *                   type: object
  *                   properties:
- *                     userName: { type: string }
+ *                     display_name: { type: string, nullable: true }
  *                     cyclePhase:
  *                       type: string
  *                       enum: [menstrual, follicular, fertile, pms, unknown]
