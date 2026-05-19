@@ -14,7 +14,6 @@
     "@tailwindcss/vite": "^4.1.18",
     "axios": "^1.15.1",
     "date-fns": "^4.1.0",
-    "forminit": "^0.2.4",
     "lucide-react": "^0.447.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

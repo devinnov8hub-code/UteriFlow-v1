@@ -6,6 +6,8 @@ import AuthPage from './pages/AuthPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import UsersPage from './pages/UsersPage'
 import ContentPage from './pages/ContentPage'
+import NewsletterPage from './pages/NewsletterPage'
+import WaitlistPage from './pages/WaitlistPage'
 import NotificationsPage from './pages/NotificationsPage'
 import SettingsPage from './pages/SettingsPage'
 import './admin.css'
@@ -54,6 +56,8 @@ function AdminRoutes() {
       <Route path="analytics"     element={<PrivateRoute><Layout><AnalyticsPage /></Layout></PrivateRoute>} />
       <Route path="users"         element={<PrivateRoute><Layout><UsersPage /></Layout></PrivateRoute>} />
       <Route path="content"       element={<PrivateRoute><Layout><ContentPage /></Layout></PrivateRoute>} />
+      <Route path="newsletter"    element={<PrivateRoute><Layout><NewsletterPage /></Layout></PrivateRoute>} />
+      <Route path="waitlist"      element={<PrivateRoute><Layout><WaitlistPage /></Layout></PrivateRoute>} />
       <Route path="notifications" element={<PrivateRoute><Layout><NotificationsPage /></Layout></PrivateRoute>} />
       <Route path="settings"      element={<PrivateRoute><Layout><SettingsPage /></Layout></PrivateRoute>} />
       {/* Default /admin and any unknown sub-path → analytics if logged in, otherwise login */}

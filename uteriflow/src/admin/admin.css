@@ -9,14 +9,18 @@
  */
 
 :root {
-  --purple-deep:   #3d0a55;
-  --purple:        #4a1060;
-  --purple-mid:    #6b2d8b;
-  --purple-light:  #9b59b6;
-  --purple-pale:   #f3e8ff;
-  --purple-xpale:  #faf5ff;
-  --accent:        #7c3aed;
-  --accent-light:  #a78bfa;
+  /* ─── UteriFlow brand purples — synced with the landing page ───────────
+     The admin used to ride on a different purple ramp (#4a1060). The brand
+     refresh consolidated everything around #690064 (deep) → #AB2EA5 (mid)
+     so the admin sidebar, accents, and CTAs match the marketing site. */
+  --purple-deep:   #420040;
+  --purple:        #690064;
+  --purple-mid:    #AB2EA5;
+  --purple-light:  #D088CC;
+  --purple-pale:   #F3D6F1;
+  --purple-xpale:  #FAF0FA;
+  --accent:        #AB2EA5;
+  --accent-light:  #D088CC;
   --white:         #ffffff;
   --gray-50:       #f9fafb;
   --gray-100:      #f3f4f6;

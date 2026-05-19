@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router'
-import { BarChart2, FileText, Users, Settings, Bell, LogOut, Menu, X } from 'lucide-react'
+import { BarChart2, FileText, Users, Settings, Bell, LogOut, Menu, X, Mail, UserPlus } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import logo from '../../assets/logo.svg'
 
 const NAV = [
   { to: '/admin/analytics',     icon: BarChart2, label: 'Analytics'      },
   { to: '/admin/users',         icon: Users,     label: 'Users'           },
   { to: '/admin/content',       icon: FileText,  label: 'Manage Content'  },
+  { to: '/admin/newsletter',    icon: Mail,      label: 'Newsletter'      },
+  { to: '/admin/waitlist',      icon: UserPlus,  label: 'Waitlist'        },
   { to: '/admin/notifications', icon: Bell,      label: 'Notifications'   },
   { to: '/admin/settings',      icon: Settings,  label: 'Settings'        },
 ]
@@ -14,7 +17,7 @@ const NAV = [
 function Brand() {
   return (
     <div style={{ display:'flex', alignItems:'center', padding:'0 24px 24px', borderBottom:'1px solid rgba(255,255,255,0.1)', flexShrink:0 }}>
-      <img src="/admin/logo.png" alt="UteriFlow" style={{ height:'24px', objectFit:'contain' }} />
+      <img src={logo} alt="UteriFlow" style={{ height:'24px', objectFit:'contain', filter:'brightness(0) invert(1)' }} />
     </div>
   )
 }
@@ -75,7 +78,7 @@ export default function Sidebar() {
       `}</style>
       <div className="sidebar-desktop">{sidebarContent}</div>
       <div className="sidebar-topbar">
-        <img src="/admin/logo.png" alt="UteriFlow" style={{ height:'22px', objectFit:'contain' }} />
+        <img src={logo} alt="UteriFlow" style={{ height:'22px', objectFit:'contain', filter:'brightness(0) invert(1)' }} />
         <button onClick={() => setMobileOpen(true)} style={{ background:'rgba(255,255,255,0.12)', border:'none', color:'white', borderRadius:'8px', padding:'8px', cursor:'pointer', display:'flex' }}>
           <Menu size={20} />
         </button>

@@ -233,26 +233,119 @@ router.post('/logout', async (req, res, next) => {
 });
 
 router.post('/password/forgot', authValidators.email, validate, async (req, res, next) => {
+  // Generic response sent back to the client whether or not the email matches
+  // an account. This intentionally prevents email enumeration. All branching
+  // (account exists / doesn't exist / email-send failed) is logged
+  // server-side so it can be debugged from Vercel / Render logs without
+  // leaking information to the caller.
+  const genericResponse = {
+    message: 'If an account with this email exists, a 6-digit reset code has been sent to your email.',
+  };
+
   try {
     const { email } = req.body;
-    const { data: profile } = await supabase.from('user_profiles').select('email').eq('email', email).maybeSingle();
+    console.log(`[forgot-password] Request received for email="${email}"`);
 
+    // ─── Step 1: Find the account ──────────────────────────────────────────
+    // Earlier versions only checked `user_profiles` with `.eq('email', email)`,
+    // which silently skipped sending the OTP whenever:
+    //   • the email was stored with different casing (e.g. "User@Gmail.com");
+    //   • the user existed in `auth.users` but no profile row was created
+    //     (e.g. signup was interrupted before the profile insert);
+    //   • Postgres' default collation produced no match for any other reason.
+    // The user saw `{ status: "success", ... }` but never received an email.
+    //
+    // We now do a case-insensitive `ilike` lookup AND, if that misses, fall
+    // back to the Supabase Auth admin user list. Either match is enough.
+
+    let accountFound = false;
+    let resolvedEmail = email; // what we'll write to the OTP row + send to
+
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('email')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error('[forgot-password] user_profiles lookup error:', profileError.message);
+    }
     if (profile) {
-     
-      await supabase.from('email_verifications').update({ attempts: 99 }).eq('email', email).eq('verified', false);
-
-      const otpCode = generateOTP();
-      const expiresAt = getOTPExpiryTime();
-
-      await supabase.from('email_verifications').insert({
-        email, otp_code: otpCode, expires_at: expiresAt, verified: false, attempts: 0,
-      });
-
-      await sendPasswordResetOTPEmail(email, otpCode);
+      accountFound = true;
+      resolvedEmail = profile.email; // use the stored casing
+      console.log(`[forgot-password] Profile match in user_profiles for "${resolvedEmail}"`);
+    } else if (supabaseAdmin) {
+      // Fallback: maybe the user exists in auth.users but not in user_profiles.
+      try {
+        const { data: { users }, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (listErr) {
+          console.error('[forgot-password] auth.admin.listUsers error:', listErr.message);
+        } else {
+          const lower = email.toLowerCase();
+          const authUser = (users || []).find((u) => (u.email || '').toLowerCase() === lower);
+          if (authUser) {
+            accountFound = true;
+            resolvedEmail = authUser.email || email;
+            console.log(`[forgot-password] Profile missing but auth.users match for "${resolvedEmail}"`);
+          }
+        }
+      } catch (e) {
+        console.error('[forgot-password] auth fallback failed:', e.message);
+      }
     }
 
-    return success(res, { message: 'If an account with this email exists, a 6-digit reset code has been sent to your email.' });
-  } catch (error) { next(error); }
+    if (!accountFound) {
+      console.log(`[forgot-password] No account found for "${email}" — returning generic response`);
+      return success(res, genericResponse);
+    }
+
+    // ─── Step 2: Invalidate previous unverified codes ──────────────────────
+    const adminClient = supabaseAdmin || supabase;
+    const { error: invalidateError } = await adminClient
+      .from('email_verifications')
+      .update({ attempts: 99 })
+      .ilike('email', resolvedEmail)
+      .eq('verified', false);
+    if (invalidateError) {
+      console.error('[forgot-password] invalidate previous codes error:', invalidateError.message);
+    }
+
+    // ─── Step 3: Create the OTP row ────────────────────────────────────────
+    const otpCode   = generateOTP();
+    const expiresAt = getOTPExpiryTime();
+
+    const { error: insertError } = await adminClient
+      .from('email_verifications')
+      .insert({
+        email:      resolvedEmail,
+        otp_code:   otpCode,
+        expires_at: expiresAt,
+        verified:   false,
+        attempts:   0,
+      });
+    if (insertError) {
+      console.error('[forgot-password] OTP insert FAILED:', JSON.stringify(insertError));
+      // Don't reveal to the client — they get the generic response.
+      return success(res, genericResponse);
+    }
+
+    // ─── Step 4: Send the email ────────────────────────────────────────────
+    try {
+      await sendPasswordResetOTPEmail(resolvedEmail, otpCode);
+      console.log(`[forgot-password] OTP sent to "${resolvedEmail}"`);
+    } catch (mailErr) {
+      console.error(`[forgot-password] sendPasswordResetOTPEmail FAILED for "${resolvedEmail}":`, mailErr.message);
+      // We still return success so behaviour for the client matches the
+      // not-found path. The error is in the logs for the operator.
+    }
+
+    return success(res, genericResponse);
+  } catch (error) {
+    // Unexpected failure — log and still return the generic response so we
+    // don't leak account existence through error shape.
+    console.error('[forgot-password] Unhandled error:', error?.message || error);
+    return success(res, genericResponse);
+  }
 });
 
 router.post('/password/verify-code', authValidators.verifyResetCode, validate, async (req, res, next) => {
@@ -262,7 +355,7 @@ router.post('/password/verify-code', authValidators.verifyResetCode, validate, a
     const { data: verification, error: fetchError } = await supabase
       .from('email_verifications')
       .select('*')
-      .eq('email', email)
+      .ilike('email', email)
       .eq('verified', false)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -310,7 +403,7 @@ router.post('/password/reset', authValidators.resetPassword, validate, async (re
     const { data: { users }, error: lookupError } = await supabaseAdmin.auth.admin.listUsers();
     if (lookupError) throw lookupError;
 
-    const authUser = users?.find((u) => u.email === verification.email);
+    const authUser = users?.find((u) => (u.email || '').toLowerCase() === (verification.email || '').toLowerCase());
     if (!authUser) throw new NotFoundError('Account not found.');
 
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(authUser.id, { password });

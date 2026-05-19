@@ -299,4 +299,98 @@ router.post('/notifications/broadcast', [
   } catch (error) { next(error); }
 });
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// Landing-page lead inboxes
+//
+// The public landing site posts to /api/v1/landing/{newsletter,waitlist}.
+// Admins read and curate that data through the endpoints below.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ─── Newsletter subscribers ────────────────────────────────────────────────
+router.get('/newsletter', [
+  ...paginationValidators,
+  query('search').optional().trim().isLength({ max: 100 }),
+], validate, async (req, res, next) => {
+  try {
+    const limit  = req.query.limit  ?? 50;
+    const offset = req.query.offset ?? 0;
+    const { search } = req.query;
+
+    let q = supabaseAdmin
+      .from('newsletter_subscribers')
+      .select('id, email, source, ip, user_agent, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (search) q = q.ilike('email', `%${search}%`);
+
+    const { data, count, error } = await q;
+    if (error) throw error;
+
+    return success(res, {
+      subscribers: data ?? [],
+      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+    });
+  } catch (error) { next(error); }
+});
+
+router.delete('/newsletter/:id', uuidParam, validate, async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('newsletter_subscribers')
+      .delete()
+      .eq('id', req.params.id)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)  throw new NotFoundError('Subscriber not found');
+    return success(res, { message: 'Subscriber removed', deleted: { id: data.id, email: data.email } });
+  } catch (error) { next(error); }
+});
+
+
+// ─── Waitlist entries ──────────────────────────────────────────────────────
+router.get('/waitlist', [
+  ...paginationValidators,
+  query('search').optional().trim().isLength({ max: 100 }),
+], validate, async (req, res, next) => {
+  try {
+    const limit  = req.query.limit  ?? 50;
+    const offset = req.query.offset ?? 0;
+    const { search } = req.query;
+
+    let q = supabaseAdmin
+      .from('waitlist_entries')
+      .select('id, name, email, source, ip, user_agent, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (search) q = q.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+
+    const { data, count, error } = await q;
+    if (error) throw error;
+
+    return success(res, {
+      entries: data ?? [],
+      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+    });
+  } catch (error) { next(error); }
+});
+
+router.delete('/waitlist/:id', uuidParam, validate, async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('waitlist_entries')
+      .delete()
+      .eq('id', req.params.id)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)  throw new NotFoundError('Waitlist entry not found');
+    return success(res, { message: 'Waitlist entry removed', deleted: { id: data.id, email: data.email } });
+  } catch (error) { next(error); }
+});
+
+
 export default router;

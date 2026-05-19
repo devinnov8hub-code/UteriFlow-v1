@@ -104,6 +104,15 @@ export const api = {
   getPeriodLogs:   (p={})  => client.get('/admin/period-logs',          { params: p }),
   deletePeriodLog: (id)    => client.delete(`/admin/period-logs/${id}`),
 
+  // Landing-page lead inboxes (newsletter subscribers, waitlist entries).
+  // The public landing posts to /api/v1/landing/{newsletter,waitlist}; admins
+  // read and delete via the endpoints below. See Backend/src/routes/admin.js
+  // and Backend/src/routes/landing.js.
+  getNewsletter:      (p={}) => client.get('/admin/newsletter',  { params: p }),
+  deleteNewsletter:   (id)   => client.delete(`/admin/newsletter/${id}`),
+  getWaitlist:        (p={}) => client.get('/admin/waitlist',    { params: p }),
+  deleteWaitlistEntry:(id)   => client.delete(`/admin/waitlist/${id}`),
+
   // Posts and comments live under /admin/community in the backend
   // (Backend/src/routes/community.js mounted at /api/v1/admin/community).
   // Earlier these were calling /admin/posts and /admin/comments which

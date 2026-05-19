@@ -2,16 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/uteriflow-logo.png" />
+    <link rel="icon" type="image/svg+xml" href="/uteriflow-logo.svg" />
+    <link rel="alternate icon" type="image/png" href="/uteriflow-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Montserrat for landing, DM Sans / DM Serif Display for the admin section -->
+    <!--
+      Plus Jakarta Sans drives the landing page (set in src/index.css).
+      DM Sans + DM Serif Display drive the admin section (scoped under
+      .admin-app in src/admin/admin.css). All three are loaded here so
+      there's no FOUT when navigating between the two surfaces.
+    -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Serif+Display:ital@0;1&display=swap"
       rel="stylesheet"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UteriFlow</title>
+    <meta
+      name="description"
+      content="UteriFlow — a holistic PCOS and cycle-care companion built for African women. Track, learn, and feel in control."
+    />
+    <meta name="theme-color" content="#690064" />
+    <title>UteriFlow — Understand your cycle. Own your health.</title>
   </head>
   <body>
     <div id="root"></div>

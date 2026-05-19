@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 import api from '../api'
 import { Btn } from '../components/UI'
+import brandLogo from '../../assets/logo.svg'
 
 function PwInput({ label, value, onChange, placeholder }) {
   const [show, setShow] = useState(false)
@@ -47,7 +48,7 @@ function EmailInput({ label, value, onChange, placeholder }) {
 function Logo() {
   return (
     <div style={{ display:'flex', justifyContent:'center', marginBottom:'28px' }}>
-      <img src="/admin/Logo-purple.png" alt="UteriFlow" style={{ height:'32px', objectFit:'contain' }} />
+      <img src={brandLogo} alt="UteriFlow" style={{ height:'32px', objectFit:'contain' }} />
     </div>
   )
 }
@@ -68,9 +69,9 @@ function AuthLeft() {
       {/* brand row — white logo on purple background */}
       <div style={{ display:'flex', alignItems:'center', position:'relative', zIndex:1 }}>
         <img
-          src="/admin/logo.png"
+          src={brandLogo}
           alt="UteriFlow"
-          style={{ height:'26px', objectFit:'contain' }}
+          style={{ height:'26px', objectFit:'contain', filter:'brightness(0) invert(1)' }}
         />
       </div>
 
