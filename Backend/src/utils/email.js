@@ -106,7 +106,7 @@ export const sendOTPEmail = async (to, otpCode) => {
   await sendMail({
     to,
     subject: 'Your UteriFlow Verification Code',
-    text: `Your verification code is: ${otpCode}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore this email.`,
+    text: `Hi Queen, Your verification code is: ${otpCode}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore this email.`,
     html: emailLayout('Email Verification', `
       <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111827;text-align:center;">Verify your email address</h2>
       <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.6;text-align:center;">
@@ -128,7 +128,7 @@ export const sendPasswordResetOTPEmail = async (to, otpCode) => {
   await sendMail({
     to,
     subject: 'Reset your UteriFlow password',
-    text: `Your password reset code is: ${otpCode}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore this email.`,
+    text: `Hi Queen, Your password reset code is: ${otpCode}\n\nThis code expires in 10 minutes.\n\nIf you did not request this, please ignore this email.`,
     html: emailLayout('Password Reset', `
       <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111827;text-align:center;">Reset your password</h2>
       <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.6;text-align:center;">
@@ -151,7 +151,7 @@ export const sendWelcomeEmail = async (to, displayName) => {
   await sendMail({
     to,
     subject: 'Welcome to UteriFlow 🌸',
-    text: `Hi ${name},\n\nWelcome to UteriFlow! Your account has been created successfully.\n\nStart by completing your profile to get personalised insights.\n\nThe UteriFlow Team`,
+    text: `Hi Queen, ${name},\n\nWelcome to UteriFlow! Your account has been created successfully.\n\nStart by completing your profile to get personalised insights.\n\nThe UteriFlow Team`,
     html: emailLayout('Welcome', `
       <h2 style="margin:0 0 16px;font-size:20px;font-weight:600;color:#111827;text-align:center;">Welcome to UteriFlow, ${name}! 🌸</h2>
       <p style="margin:0 0 16px;font-size:14px;color:#6b7280;line-height:1.7;text-align:center;">
@@ -183,7 +183,7 @@ export const sendPasswordChangedEmail = async (to) => {
   await sendMail({
     to,
     subject: 'Your UteriFlow password was changed',
-    text: `Your password was successfully changed on ${time}.\n\nIf you did not make this change, please contact us immediately and reset your password.`,
+    text: `Hi Queen, Your password was successfully changed on ${time}.\n\nIf you did not make this change, please contact us immediately and reset your password.`,
     html: emailLayout('Security Alert', `
       <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111827;text-align:center;">Your password was changed</h2>
       <p style="margin:0 0 20px;font-size:14px;color:#6b7280;line-height:1.6;text-align:center;">
@@ -214,7 +214,7 @@ export const sendOnboardingCompleteEmail = async (to, displayName) => {
   await sendMail({
     to,
     subject: 'Your UteriFlow profile is complete ',
-    text: `Hi ${name},\n\nYou've completed your UteriFlow profile! You're all set to start tracking your cycle.\n\nThe UteriFlow Team`,
+    text: `Hi Queen, ${name},\n\nYou've completed your UteriFlow profile! You're all set to start tracking your cycle.\n\nThe UteriFlow Team`,
     html: emailLayout('Profile Complete', `
       <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#111827;text-align:center;">Your profile is complete! 🎉</h2>
       <p style="margin:0 0 20px;font-size:14px;color:#6b7280;line-height:1.6;text-align:center;">
