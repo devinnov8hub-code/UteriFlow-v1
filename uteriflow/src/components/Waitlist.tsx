@@ -1,12 +1,9 @@
 import { useState } from "react";
 import logo from "../assets/uteriflow-drop-white.svg";
 import { type WaitlistForm } from "../types/waitlist";
-import { Forminit } from "forminit";
 import { CheckCircle, AlertCircle } from "lucide-react";
 
-// move outside component
-const forminit = new Forminit();
-const FORM_ID = import.meta.env.VITE_FORM_ID;
+const FORM_INIT_URL = import.meta.env.VITE_FORM_INIT_URL;
 
 type StatusType = "idle" | "loading" | "success" | "error";
 
@@ -72,9 +69,12 @@ const Waitlist = () => {
       data.append("fi-sender-lastName", formData.lastName);
       data.append("fi-sender-email", formData.email);
 
-      const { error } = await forminit.submit(FORM_ID, data);
+      const response = await fetch(FORM_INIT_URL, {
+        method: "POST",
+        body: data,
+      });
 
-      if (error) {
+      if (!response.ok) {
         setStatus("error");
         return;
       }
