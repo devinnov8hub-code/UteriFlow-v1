@@ -164,10 +164,9 @@ export default function Footer() {
           <div className="flex items-center gap-4">
             <p className="text-xs text-gray-600">Not a substitute for professional medical advice.</p>
             <Link
-              to="/admin/login"
-              className="text-xs text-gray-600 hover:text-gray-400 transition-colors border-l border-white/10 pl-4"
+              
             >
-              Management
+             
             </Link>
           </div>
         </div>

@@ -227,93 +227,11 @@ export default function AuthPage() {
                 <EmailInput label="Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="Enter your email address" />
                 <PwInput label="Password" value={loginPass} onChange={e => setLoginPass(e.target.value)} placeholder="••••••••••••" />
                 <Btn type="submit" size="full" loading={loading} style={{ marginTop:'8px' }}>Login</Btn>
-                <p style={{ textAlign:'center', marginTop:'18px', fontSize:'13px', color:'var(--gray-500)' }}>
+              {/* ── <p style={{ textAlign:'center', marginTop:'18px', fontSize:'13px', color:'var(--gray-500)' }}>
                   Already Have an Account? <TextBtn label="SignUp" onClick={() => setScreen('signup')} bold />
-                </p>
-                <p style={{ textAlign:'center', marginTop:'10px', fontSize:'13px', color:'var(--gray-500)' }}>
-                  Forgot Password? <TextBtn label="Reset" onClick={() => setScreen('forgot')} bold />
-                </p>
+                </p> ── */}      
               </form>
-            )}
-
-            {/* ── SIGNUP step 1 ── */}
-            {screen === 'signup' && !otpStep && (
-              <form onSubmit={handleSendOTP} style={formCard}>
-                <Logo />
-                <h2 style={{ textAlign:'center', fontSize:'20px', fontWeight:600, marginBottom:'28px' }}>Create an Admin Account</h2>
-                <EmailInput label="Email" value={signupEmail} onChange={e => setSignupEmail(e.target.value)} placeholder="Enter your email address" />
-                <PwInput label="Create Password" value={signupPass} onChange={e => setSignupPass(e.target.value)} placeholder="Create a password" />
-                <PwInput label="Confirm Password" value={signupConfirm} onChange={e => setSignupConfirm(e.target.value)} placeholder="Confirm your password" />
-                <Btn type="submit" size="full" loading={loading} style={{ marginTop:'8px' }}>Create Account</Btn>
-                <p style={{ textAlign:'center', marginTop:'18px', fontSize:'13px', color:'var(--gray-500)' }}>
-                  Already Have an Account? <TextBtn label="Login" onClick={() => setScreen('login')} bold />
-                </p>
-              </form>
-            )}
-
-            {/* ── SIGNUP step 2 OTP ── */}
-            {screen === 'signup' && otpStep && (
-              <form onSubmit={handleVerifyAndCreate} style={formCard}>
-                <Logo />
-                <div style={{ textAlign:'center', marginBottom:'24px' }}>
-                  <div style={{ width:'80px', height:'80px', background:'var(--purple-pale)', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'36px', margin:'0 auto 14px' }}>✉️</div>
-                  <h2 style={{ fontSize:'20px', fontWeight:600, marginBottom:'8px' }}>Verify Email</h2>
-                  <p style={{ fontSize:'14px', color:'var(--gray-500)', lineHeight:1.6 }}>
-                    We've sent a verification code to <strong>{signupEmail}</strong>
-                  </p>
-                </div>
-                <div style={{ marginBottom:'18px' }}>
-                  <label style={{ display:'block', fontSize:'13px', fontWeight:500, color:'var(--gray-700)', marginBottom:'6px' }}>Verification code</label>
-                  <div style={{ position:'relative' }}>
-                    <Lock size={14} style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', color:'var(--gray-400)' }} />
-                    <input value={otpCode} onChange={e => setOtpCode(e.target.value)} placeholder="Enter 6-digit code" maxLength={6} required
-                      style={{ width:'100%', padding:'11px 14px 11px 38px', border:'1.5px solid var(--gray-200)', borderRadius:'8px', fontSize:'14px', outline:'none', fontFamily:'inherit', letterSpacing:'0.12em' }}
-                      onFocus={e => e.target.style.borderColor='#c084fc'} onBlur={e => e.target.style.borderColor='var(--gray-200)'}
-                    />
-                  </div>
-                </div>
-                <Btn type="submit" size="full" loading={loading}>Verify & Continue</Btn>
-              </form>
-            )}
-
-            {/* ── FORGOT ── */}
-            {screen === 'forgot' && (
-              <form onSubmit={handleForgot} style={formCard}>
-                <Logo />
-                <h2 style={{ textAlign:'center', fontSize:'20px', fontWeight:600, marginBottom:'8px' }}>Reset Password</h2>
-                <p style={{ textAlign:'center', fontSize:'14px', color:'var(--gray-500)', marginBottom:'28px', lineHeight:1.6 }}>
-                  Enter your email and we'll send you a verification link
-                </p>
-                <EmailInput label="Email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} placeholder="Enter your email address" />
-                <Btn type="submit" size="full" loading={loading}>Send verification link</Btn>
-                <p style={{ textAlign:'center', marginTop:'18px', fontSize:'13px' }}>
-                  <TextBtn label="← Go Back" onClick={() => setScreen('login')} />
-                </p>
-              </form>
-            )}
-
-            {/* ── RESET ── */}
-            {screen === 'reset' && (
-              <form onSubmit={handleReset} style={formCard}>
-                <Logo />
-                <h2 style={{ textAlign:'center', fontSize:'20px', fontWeight:600, marginBottom:'8px' }}>Reset Password</h2>
-                <p style={{ textAlign:'center', fontSize:'14px', color:'var(--gray-500)', marginBottom:'28px' }}>Setup a new password to continue</p>
-                <div style={{ marginBottom:'18px' }}>
-                  <label style={{ display:'block', fontSize:'13px', fontWeight:500, color:'var(--gray-700)', marginBottom:'6px' }}>Reset code</label>
-                  <div style={{ position:'relative' }}>
-                    <Lock size={14} style={{ position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)', color:'var(--gray-400)' }} />
-                    <input value={resetCode} onChange={e => setResetCode(e.target.value)} placeholder="Enter 6-digit reset code" maxLength={6} required
-                      style={{ width:'100%', padding:'11px 14px 11px 38px', border:'1.5px solid var(--gray-200)', borderRadius:'8px', fontSize:'14px', outline:'none', fontFamily:'inherit' }}
-                      onFocus={e => e.target.style.borderColor='#c084fc'} onBlur={e => e.target.style.borderColor='var(--gray-200)'}
-                    />
-                  </div>
-                </div>
-                <PwInput label="Create New Password" value={resetPass} onChange={e => setResetPass(e.target.value)} placeholder="Create a password" />
-                <PwInput label="Confirm New Password" value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Confirm your password" />
-                <Btn type="submit" size="full" loading={loading}>Reset Password</Btn>
-              </form>
-            )}
-
+            )}   
           </div>
         </div>
       </div>
