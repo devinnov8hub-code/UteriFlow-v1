@@ -117,7 +117,7 @@ export const swaggerSpec = {
                 'spotting','insomnia','food_cravings','hot_flashes',
                 'fever','weight_gain','migraines',
                 'heavy_flow','pelvic_pain','cravings','other',
-                // PRD §4.4 — Symptom Intelligence inputs
+                // PRD 4.4 — Symptom Intelligence inputs
                 'high_libido',
                 // PRD Appendix A — PCOS Flag Evaluator inputs
                 'excess_hair','hair_thinning','weight_gain_difficulty','skin_darkening',

@@ -87,6 +87,7 @@ const emailLayout = (title, bodyContent) => `
             </tr>
             <tr>
               <td style="padding-top:28px;">
+              <p style="margin:0 0 20px;font-size:15px;font-weight:600;color:#374151;"> Hi Queen 👑, </p>
                 ${bodyContent}
               </td>
             </tr>
