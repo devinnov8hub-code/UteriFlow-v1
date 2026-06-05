@@ -49,7 +49,7 @@ async function enrichPosts(db, posts, userId) {
 
   return posts.map(p => ({
     ...p,
-    author:        p.author_id ? (profileMap[p.author_id] ?? null) : null,
+    author:        (!p.is_anonymous && p.author_id) ? (profileMap[p.author_id] ?? null) : null,
     is_liked:      likedSet.has(p.id),
     is_bookmarked: bookmarkSet.has(p.id),
     comment_count: commentMap[p.id] ?? 0,
@@ -132,9 +132,10 @@ router.post('/posts', [
   // optional({ nullable: true }) skip the isURL check entirely.
   body('image_url').customSanitizer(v => (v === '' ? undefined : v))
     .optional({ nullable: true }).isURL().withMessage('image_url must be a valid URL'),
+  body('is_anonymous').optional().isBoolean().withMessage('is_anonymous must be a boolean').toBoolean(),
 ], validate, async (req, res, next) => {
   try {
-    const { title, content, category = 'community', image_url } = req.body;
+    const { title, content, category = 'community', image_url, is_anonymous = false } = req.body;
     const userId = req.user.id;
 
     const { data: post, error } = await req.supabase
@@ -146,12 +147,17 @@ router.post('/posts', [
         image_url:    image_url || null,
         author_id:    userId,
         is_published: true,
+        is_anonymous: is_anonymous,
       })
       .select()
       .single();
     if (error) throw error;
 
     const [enriched] = await enrichPosts(req.supabase, [post], userId);
+
+    // If the post is anonymous, hide the author from the response
+    if (is_anonymous) enriched.author = null;
+
     return success(res, { message: 'Post created successfully', post: enriched }, 201);
   } catch (error) { next(error); }
 });
