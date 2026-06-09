@@ -256,6 +256,7 @@ export const swaggerSpec = {
           shares_count:  { type: 'integer' },
           is_flagged:    { type: 'boolean' },
           is_published:  { type: 'boolean' },
+          is_anonymous:  { type: 'boolean', description: 'When true, author info is hidden and returned as null' },
           is_liked:      { type: 'boolean', description: 'Whether the requesting user liked this post' },
           is_bookmarked: { type: 'boolean', description: 'Whether the requesting user bookmarked this post' },
           created_at:    { type: 'string', format: 'date-time' },
@@ -1768,6 +1769,34 @@ export const swaggerSpec = {
         ],
         responses: {
           200: { description: 'Posts with is_liked and is_bookmarked flags per user', content: { 'application/json': { schema: { type: 'object', properties: { posts: { type: 'array', items: { $ref: '#/components/schemas/Post' } }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } },
+          401: { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+      post: {
+        tags: ['Community'],
+        summary: 'Create a community post',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'content'],
+                properties: {
+                  title:        { type: 'string', maxLength: 200, example: 'Tips for managing cramps' },
+                  content:      { type: 'string', example: 'I found that heat therapy really helps...' },
+                  category:     { type: 'string', enum: ['community', 'lifestyle_tips', 'discord'], default: 'community' },
+                  image_url:    { type: 'string', format: 'uri', nullable: true, example: 'https://example.com/image.jpg' },
+                  is_anonymous: { type: 'boolean', default: false, description: 'Set to true to hide your identity. Author info will be returned as null.' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Post created successfully', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' }, post: { $ref: '#/components/schemas/Post' } } } } } },
+          400: { $ref: '#/components/responses/ValidationError' },
           401: { $ref: '#/components/responses/Unauthorized' },
         },
       },

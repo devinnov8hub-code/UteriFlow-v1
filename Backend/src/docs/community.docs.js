@@ -269,3 +269,51 @@
  *       200: { description: Post reported and flagged for admin review }
  *       401: { description: Unauthorized }
  */
+
+/**
+ * @swagger
+ * /api/v1/community/posts:
+ *   post:
+ *     summary: Create a community post
+ *     tags: [Community]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [title, content]
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 maxLength: 200
+ *                 example: Tips for managing cramps
+ *               content:
+ *                 type: string
+ *                 example: I found that heat therapy really helps...
+ *               category:
+ *                 type: string
+ *                 enum: [community, lifestyle_tips, discord]
+ *                 default: community
+ *               image_url:
+ *                 type: string
+ *                 format: uri
+ *                 nullable: true
+ *               is_anonymous:
+ *                 type: boolean
+ *                 default: false
+ *                 description: Set to true to hide your identity. Author info will be returned as null.
+ *     responses:
+ *       201:
+ *         description: Post created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string }
+ *                 post: { $ref: '#/components/schemas/Post' }
+ *       400: { description: Validation error }
+ *       401: { description: Unauthorized }
+ */
