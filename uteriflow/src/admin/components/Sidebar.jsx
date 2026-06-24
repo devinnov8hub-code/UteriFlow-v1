@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router'
-import { BarChart2, FileText, Users, Settings, Bell, LogOut, Menu, X, Mail, UserPlus } from 'lucide-react'
+import { BarChart2, FileText, Users, Settings, Bell, LogOut, Menu, X, Mail, UserPlus, BookOpen } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import logo from '../../assets/logo.svg'
 
@@ -8,6 +8,7 @@ const NAV = [
   { to: '/admin/analytics',     icon: BarChart2, label: 'Analytics'      },
   { to: '/admin/users',         icon: Users,     label: 'Users'           },
   { to: '/admin/content',       icon: FileText,  label: 'Manage Content'  },
+  { to: '/admin/articles',      icon: BookOpen,  label: 'Articles'        },
   { to: '/admin/newsletter',    icon: Mail,      label: 'Newsletter'      },
   { to: '/admin/waitlist',      icon: UserPlus,  label: 'Waitlist'        },
   { to: '/admin/notifications', icon: Bell,      label: 'Notifications'   },

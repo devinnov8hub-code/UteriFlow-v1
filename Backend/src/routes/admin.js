@@ -393,4 +393,151 @@ router.delete('/waitlist/:id', uuidParam, validate, async (req, res, next) => {
 });
 
 
+// ─── Lifestyle / Health-Library articles (admin CRUD) ──────────────────────
+// These power BOTH the public landing page (uteriflow.com/articles) and the
+// mobile app's health library. Public reads go through /api/v1/lifestyle and
+// only return `is_published = true`; admins manage the full set here.
+//
+// Category must match the DB CHECK constraint on lifestyle_articles.category.
+const LIFESTYLE_CATEGORIES = ['Daily Habits', 'Stress Management', 'Cycle Care'];
+
+const articleBodyValidators = [
+  body('title').trim().notEmpty().withMessage('Title is required').isLength({ max: 200 }),
+  body('summary').optional({ nullable: true }).trim().isLength({ max: 500 }),
+  body('content').optional({ nullable: true }).isString(),
+  body('category').optional().isIn(LIFESTYLE_CATEGORIES)
+    .withMessage(`Category must be one of: ${LIFESTYLE_CATEGORIES.join(', ')}`),
+  body('readTime').optional({ nullable: true }).isInt({ min: 1, max: 60 }).toInt(),
+  body('imageUrl').optional({ nullable: true }).isString().isLength({ max: 1000 }),
+  body('isPublished').optional().isBoolean().toBoolean(),
+];
+
+// PATCH variant — every field optional (title not required for partial edits).
+const articleUpdateValidators = [
+  body('title').optional().trim().notEmpty().withMessage('Title cannot be empty').isLength({ max: 200 }),
+  body('summary').optional({ nullable: true }).trim().isLength({ max: 500 }),
+  body('content').optional({ nullable: true }).isString(),
+  body('category').optional().isIn(LIFESTYLE_CATEGORIES)
+    .withMessage(`Category must be one of: ${LIFESTYLE_CATEGORIES.join(', ')}`),
+  body('readTime').optional({ nullable: true }).isInt({ min: 1, max: 60 }).toInt(),
+  body('imageUrl').optional({ nullable: true }).isString().isLength({ max: 1000 }),
+  body('isPublished').optional().isBoolean().toBoolean(),
+];
+
+// Map camelCase request body → snake_case columns, only for provided keys.
+function articleColumnsFromBody(b) {
+  const cols = {};
+  if (b.title       !== undefined) cols.title        = b.title;
+  if (b.summary     !== undefined) cols.summary      = b.summary;
+  if (b.content     !== undefined) cols.content      = b.content;
+  if (b.category    !== undefined) cols.category     = b.category;
+  if (b.readTime    !== undefined) cols.read_time    = b.readTime;
+  if (b.imageUrl    !== undefined) cols.image_url    = b.imageUrl;
+  if (b.isPublished !== undefined) cols.is_published = b.isPublished;
+  return cols;
+}
+
+// GET /admin/lifestyle — list ALL articles (published + drafts)
+router.get('/lifestyle', [
+  ...paginationValidators,
+  query('search').optional().trim().isLength({ max: 200 }),
+  query('category').optional().isIn(LIFESTYLE_CATEGORIES),
+  query('status').optional().isIn(['all', 'published', 'draft']),
+], validate, async (req, res, next) => {
+  try {
+    const limit  = req.query.limit  ?? 50;
+    const offset = req.query.offset ?? 0;
+    const { search, category, status } = req.query;
+
+    let q = supabaseAdmin
+      .from('lifestyle_articles')
+      .select('id, title, summary, image_url, category, read_time, is_published, created_at, updated_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (category) q = q.eq('category', category);
+    if (status === 'published') q = q.eq('is_published', true);
+    if (status === 'draft')     q = q.eq('is_published', false);
+    if (search)   q = q.ilike('title', `%${search}%`);
+
+    const { data, count, error } = await q;
+    if (error) throw error;
+
+    return success(res, {
+      articles: data ?? [],
+      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+    });
+  } catch (error) { next(error); }
+});
+
+// GET /admin/lifestyle/:id — full article (incl. unpublished, for editing)
+router.get('/lifestyle/:id', uuidParam, validate, async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_articles')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)  throw new NotFoundError('Article not found');
+    return success(res, { article: data });
+  } catch (error) { next(error); }
+});
+
+// POST /admin/lifestyle — create an article
+router.post('/lifestyle', articleBodyValidators, validate, async (req, res, next) => {
+  try {
+    const cols = articleColumnsFromBody(req.body);
+    // Sensible defaults so a minimal create still satisfies the schema.
+    if (cols.category    === undefined) cols.category     = 'Daily Habits';
+    if (cols.content     === undefined) cols.content      = '';
+    if (cols.is_published === undefined) cols.is_published = true;
+
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_articles')
+      .insert(cols)
+      .select()
+      .single();
+    if (error) throw error;
+
+    return success(res, { message: 'Article created successfully', article: data }, 201);
+  } catch (error) { next(error); }
+});
+
+// PATCH /admin/lifestyle/:id — update an article (any subset of fields)
+router.patch('/lifestyle/:id', [...uuidParam, ...articleUpdateValidators], validate, async (req, res, next) => {
+  try {
+    const cols = articleColumnsFromBody(req.body);
+    if (Object.keys(cols).length === 0)
+      return success(res, { message: 'No changes provided' });
+
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_articles')
+      .update(cols)
+      .eq('id', req.params.id)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)  throw new NotFoundError('Article not found');
+
+    return success(res, { message: 'Article updated successfully', article: data });
+  } catch (error) { next(error); }
+});
+
+// DELETE /admin/lifestyle/:id
+router.delete('/lifestyle/:id', uuidParam, validate, async (req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('lifestyle_articles')
+      .delete()
+      .eq('id', req.params.id)
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)  throw new NotFoundError('Article not found');
+    return success(res, { message: 'Article deleted successfully', deleted: { id: data.id, title: data.title } });
+  } catch (error) { next(error); }
+});
+
+
 export default router;

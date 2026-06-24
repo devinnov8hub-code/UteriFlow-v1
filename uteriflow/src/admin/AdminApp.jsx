@@ -6,6 +6,7 @@ import AuthPage from './pages/AuthPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import UsersPage from './pages/UsersPage'
 import ContentPage from './pages/ContentPage'
+import ArticlesPage from './pages/ArticlesPage'
 import NewsletterPage from './pages/NewsletterPage'
 import WaitlistPage from './pages/WaitlistPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -56,6 +57,7 @@ function AdminRoutes() {
       <Route path="analytics"     element={<PrivateRoute><Layout><AnalyticsPage /></Layout></PrivateRoute>} />
       <Route path="users"         element={<PrivateRoute><Layout><UsersPage /></Layout></PrivateRoute>} />
       <Route path="content"       element={<PrivateRoute><Layout><ContentPage /></Layout></PrivateRoute>} />
+      <Route path="articles"      element={<PrivateRoute><Layout><ArticlesPage /></Layout></PrivateRoute>} />
       <Route path="newsletter"    element={<PrivateRoute><Layout><NewsletterPage /></Layout></PrivateRoute>} />
       <Route path="waitlist"      element={<PrivateRoute><Layout><WaitlistPage /></Layout></PrivateRoute>} />
       <Route path="notifications" element={<PrivateRoute><Layout><NotificationsPage /></Layout></PrivateRoute>} />

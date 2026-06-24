@@ -185,9 +185,34 @@ router.patch('/posts/:id', [...uuidParam,
 
 router.delete('/posts/:id', uuidParam, validate, async (req, res, next) => {
   try {
-    const { data, error } = await supabaseAdmin.from('posts').delete().eq('id', req.params.id).select().maybeSingle();
-    if (error) throw error;
-    if (!data) throw new NotFoundError('Post not found');
+    const id = req.params.id;
+
+    // Confirm the post exists first so we can return a clean 404 instead of an
+    // ambiguous "null row" outcome.
+    const { data: existing, error: findErr } = await supabaseAdmin
+      .from('posts').select('id').eq('id', id).maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) throw new NotFoundError('Post not found');
+
+    // Defensive dependent cleanup. ON DELETE CASCADE *should* handle all of
+    // these, but doing it explicitly (and in the right order) guarantees the
+    // delete succeeds even if a constraint was created without CASCADE or a
+    // migration was applied out of order in a given environment — which is the
+    // most common reason "delete post" silently fails in production.
+    const { data: comments } = await supabaseAdmin
+      .from('comments').select('id').eq('post_id', id);
+    const commentIds = (comments ?? []).map(c => c.id);
+
+    if (commentIds.length) {
+      await supabaseAdmin.from('comment_likes').delete().in('comment_id', commentIds);
+    }
+    await supabaseAdmin.from('comments').delete().eq('post_id', id);
+    await supabaseAdmin.from('post_likes').delete().eq('post_id', id);
+    await supabaseAdmin.from('post_bookmarks').delete().eq('post_id', id);
+
+    const { error: delErr } = await supabaseAdmin.from('posts').delete().eq('id', id);
+    if (delErr) throw delErr;
+
     return success(res, { message: 'Post deleted successfully' });
   } catch (error) { next(error); }
 });

@@ -62,6 +62,35 @@ export function isHormonalContraceptive(contraceptiveType) {
 }
 
 
+// ─── Onboarding predictability gate ────────────────────────────────
+// Product rule (Figma onboarding screens "How regular is your period?" and
+// "How long was your last cycle?"):
+//
+//   The engine must NOT auto-predict (next period / ovulation / fertile window)
+//   for users whose onboarding answers indicate an unpredictable or very long
+//   cycle. These users are asked to LOG their cycles themselves after onboarding;
+//   prediction resumes only once enough REAL logged cycles exist to compute a
+//   measured average. We never fabricate a prediction from the wide onboarding
+//   estimate (e.g. the 45-day midpoint of "36–60 days" or the 65-day midpoint
+//   of "more than 60 days").
+//
+// Non-predictive answers:
+//   period_regularity ∈ { varies_week, unpredictable }
+//   cycle_length_range ∈ { 36_60, gt_60 }
+//
+// NOTE: 'not_tracked' (regularity) and 'lt_21' (cycle range) are intentionally
+// left predictive-eligible — change the sets below if product wants them
+// treated as non-predictive too.
+export const NON_PREDICTIVE_REGULARITY  = new Set(['varies_week', 'unpredictable']);
+export const NON_PREDICTIVE_CYCLE_RANGE = new Set(['36_60', 'gt_60']);
+
+export function onboardingIsPredictive({ periodRegularity, cycleLengthRange } = {}) {
+  if (periodRegularity && NON_PREDICTIVE_REGULARITY.has(periodRegularity)) return false;
+  if (cycleLengthRange && NON_PREDICTIVE_CYCLE_RANGE.has(cycleLengthRange)) return false;
+  return true;
+}
+
+
 // ─── Cycle statistics from period_logs[] ───────────────────────────
 // Expects logs sorted ASC by start_date. Returns null fields when there
 // isn't enough data (rather than fabricating a 28-day cycle).

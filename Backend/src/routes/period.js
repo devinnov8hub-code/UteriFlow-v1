@@ -9,7 +9,7 @@ import {
   cycleStats, avgBleedLength, classifyUserType, calculatePhase,
   inferPhaseFromSymptoms, evaluatePcosFlags, computePcosTier,
   confidenceLevel, calculateCycleDay, isHormonalContraceptive,
-  evaluateLatePeriodPathway,
+  evaluateLatePeriodPathway, onboardingIsPredictive, mapHormonalToPcos,
 } from '../utils/cycleEngine.js';
 import { selectDailyInsight } from '../utils/insightEngine.js';
 
@@ -47,9 +47,24 @@ async function loadUserContext(db, userId, today = new Date()) {
   const stats = cycleStats(periodLogs);
   const bleed = avgBleedLength(periodLogs) ?? profile.period_length_avg ?? null;
 
-  // Effective cycle length: prefer measured average (logs), fall back to
-  // onboarding estimate. NULL means "we don't know yet" — never default to 28.
-  const effectiveCycleLength = stats.avgCycleLength ?? profile.cycle_length_avg ?? null;
+  // Is this user's onboarding profile predictable? Users who answered
+  // "varies by more than a week" / "totally unpredictable" (regularity) or
+  // "36–60 days" / "more than 60 days" (last cycle) must NOT be auto-predicted
+  // from the onboarding estimate — they log their cycles themselves and the
+  // engine only predicts once a MEASURED average exists.
+  const onboardingPredictive = onboardingIsPredictive({
+    periodRegularity: profile.period_regularity,
+    cycleLengthRange: profile.cycle_length_range,
+  });
+
+  // Measured average comes only from 2+ real logged cycles (null otherwise).
+  const measuredCycleLength = stats.avgCycleLength;
+
+  // Effective cycle length: prefer the measured average (logs). Fall back to the
+  // onboarding estimate ONLY for predictable profiles. For non-predictive users
+  // with no logged cycles this stays NULL → no fabricated phase/prediction.
+  const effectiveCycleLength = measuredCycleLength
+    ?? (onboardingPredictive ? (profile.cycle_length_avg ?? null) : null);
 
   let daysSinceLastPeriod = null;
   let lastPeriodStart = profile.last_period_start;
@@ -130,6 +145,28 @@ async function loadUserContext(db, userId, today = new Date()) {
     pcosStatus,
   });
 
+  // ── Prediction availability (single source of truth for the clients) ──
+  // The mobile app should hide next-period / ovulation / fertile-window UI and
+  // instead prompt the user to log their cycle whenever predictions are not
+  // enabled. Reasons are mutually exclusive, evaluated in priority order.
+  let predictionsSuppressedReason = null;
+  if (userType === 'PCOS')                          predictionsSuppressedReason = 'pcos';
+  else if (onContraceptive)                         predictionsSuppressedReason = 'hormonal_contraceptive';
+  else if (effectiveCycleLength == null) {
+    // No measured average yet. If onboarding was non-predictive, the user must
+    // log cycles before we predict; otherwise we simply have no baseline at all.
+    predictionsSuppressedReason = onboardingPredictive
+      ? 'insufficient_data'
+      : 'awaiting_user_logs';
+  }
+  const predictions = {
+    enabled:           predictionsSuppressedReason == null,
+    suppressedReason:  predictionsSuppressedReason,            // null when enabled
+    onboardingPredictive,
+    hasMeasuredCycle:  measuredCycleLength != null,
+    cyclesLogged:      stats.cyclesUsed,
+  };
+
   return {
     profile,
     pcosStatus,
@@ -151,6 +188,7 @@ async function loadUserContext(db, userId, today = new Date()) {
     pcosTier,
     latePathway,
     confidence,
+    predictions,
     todaySymptoms: todayLog?.symptoms ?? [],
     recentSymptomLogs: symptomLogs,
   };
@@ -210,22 +248,27 @@ function computePredictions(lastStart, cycleLengthAvg, periodLengthAvg) {
 }
 
 async function refreshPredictions(db, userId) {
-  // Pull the contraceptive type along with cycle averages so we can suppress
-  // prediction generation for users on hormonal birth control (PRD Bug 3 fix b).
-  const { data: profile } = await db
-    .from('user_profiles')
-    .select('cycle_length_avg, period_length_avg, contraceptive_type')
-    .eq('id', userId)
-    .maybeSingle();
-
-  // PRD Bug 3 fix (b): no ovulation/fertile predictions for hormonal users
-  if (isHormonalContraceptive(profile?.contraceptive_type)) {
-    // Mark any stale predictions as not current and bail out
-    await db
-      .from('cycle_predictions')
+  // Helper: clear any cached "current" prediction. Called whenever we decide
+  // NOT to generate a prediction so a stale/bogus one (e.g. from before the
+  // user was reclassified as PCOS / irregular) doesn't linger.
+  const clearCurrent = () =>
+    db.from('cycle_predictions')
       .update({ is_current: false })
       .eq('user_id', userId)
       .eq('is_current', true);
+
+  // Pull everything we need to decide IF we should predict at all.
+  const { data: profile } = await db
+    .from('user_profiles')
+    .select('cycle_length_avg, period_length_avg, contraceptive_type, ' +
+            'period_regularity, cycle_length_range, last_period_start, ' +
+            'pcos_status, hormonal_status')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // PRD Bug 3 fix (b): no ovulation/fertile predictions for hormonal users.
+  if (isHormonalContraceptive(profile?.contraceptive_type)) {
+    await clearCurrent();
     return null;
   }
 
@@ -238,20 +281,54 @@ async function refreshPredictions(db, userId) {
     .order('start_date', { ascending: true });
 
   const measuredStats = cycleStats(allLogs || []);
-  const cycleLengthAvg  = measuredStats.avgCycleLength ?? profile?.cycle_length_avg ?? null;
+
+  // Determine the user track. PCOS users (confirmed, or 60+ days since last
+  // period) get NO calendar prediction — the engine routes them to symptom
+  // inference instead. This is the core fix for "the PCOS / 60+ day users were
+  // still receiving a normal calendar prediction after onboarding".
+  const lastStart = allLogs?.length
+    ? allLogs[allLogs.length - 1].start_date
+    : (profile?.last_period_start ?? null);
+  const daysSinceLastPeriod = lastStart
+    ? Math.floor((Date.now() - new Date(lastStart).getTime()) / 86400000)
+    : null;
+  const pcosStatus = profile?.pcos_status ?? mapHormonalToPcos(profile?.hormonal_status);
+
+  const userType = classifyUserType({
+    stats: measuredStats,
+    pcosStatus,
+    daysSinceLastPeriod,
+    cycleRegularity: profile?.period_regularity,
+  });
+
+  if (userType === 'PCOS') {
+    await clearCurrent();
+    return null;
+  }
+
+  // Product rule: users whose onboarding answers are non-predictive
+  // (regularity "varies/unpredictable" OR last cycle "36–60"/"60+") must NOT be
+  // predicted from the onboarding estimate. They log their own cycles; we only
+  // predict once a MEASURED average exists.
+  const onboardingPredictive = onboardingIsPredictive({
+    periodRegularity: profile?.period_regularity,
+    cycleLengthRange: profile?.cycle_length_range,
+  });
+
+  const cycleLengthAvg = measuredStats.avgCycleLength
+    ?? (onboardingPredictive ? (profile?.cycle_length_avg ?? null) : null);
   const periodLengthAvg = profile?.period_length_avg ?? null;
 
-  // PRD Rule 1: never assume 28 days. If we have neither measured nor onboarding
-  // data, do NOT generate a prediction — the engine will report low confidence
-  // and the UI should show an "estimate based on limited data" message instead.
+  // PRD Rule 1: never assume 28 days. With no measured average and no usable
+  // onboarding baseline, do NOT generate a prediction.
   if (!cycleLengthAvg) {
+    await clearCurrent();
     return null;
   }
 
   // periodLengthAvg can stay null — computePredictions accepts it and falls
   // back to the legacy default (which only affects predicted_end, not the
-  // ovulation/fertile math). Keeping the legacy fallback here means existing
-  // production responses don't suddenly gain null predicted_end fields.
+  // ovulation/fertile math).
   const safePeriodLength = periodLengthAvg ?? 5;
 
   const { data: lastLog } = await db
@@ -262,15 +339,14 @@ async function refreshPredictions(db, userId) {
     .limit(1)
     .maybeSingle();
 
-  if (!lastLog) return null;
+  if (!lastLog) {
+    await clearCurrent();
+    return null;
+  }
 
   const pred = computePredictions(lastLog.start_date, cycleLengthAvg, safePeriodLength);
 
-  await db
-    .from('cycle_predictions')
-    .update({ is_current: false })
-    .eq('user_id', userId)
-    .eq('is_current', true);
+  await clearCurrent();
 
   const { data } = await db
     .from('cycle_predictions')
@@ -768,6 +844,15 @@ router.get('/summary', async (req, res, next) => {
             ovulationSuppressed: ctx.contraceptive.isHormonal,
           },
           latePeriodPathway: ctx.latePathway,    // { triggered, reason, daysLate?, fertileWindow? }
+
+          // Whether the engine is auto-predicting for this user. When
+          // enabled=false the app should HIDE next-period / ovulation / fertile
+          // UI and prompt the user to log their cycle instead.
+          //   suppressedReason: 'pcos' | 'hormonal_contraceptive'
+          //                   | 'awaiting_user_logs'   (non-predictive onboarding answer)
+          //                   | 'insufficient_data'    (predictive answer but no baseline yet)
+          //                   | null                   (predictions enabled)
+          predictions:       ctx.predictions,
         },
       },
     });
@@ -1007,6 +1092,7 @@ router.get('/phase', async (req, res, next) => {
       inferred:      ctx.inferred,
       latePathway:   ctx.latePathway,
       contraceptive: ctx.contraceptive,
+      predictions:   ctx.predictions,
     });
   } catch (error) { next(error); }
 });

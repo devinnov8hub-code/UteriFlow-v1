@@ -9,17 +9,36 @@ import { body } from 'express-validator';
 import { NotFoundError, AppError, ValidationError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 import { createClient } from '@supabase/supabase-js';
+import { mapPcosToHormonal } from '../utils/cycleEngine.js';
 
 const router = express.Router();
 router.use(authenticateUser);
 router.get('/', async (req, res, next) => {
   try {
-    const { data, error } = await req.supabase
+    let { data, error } = await req.supabase
       .from('user_profiles')
       .select('*')
       .eq('id', req.user.id)
       .maybeSingle();
     if (error) throw error;
+
+    // Self-heal: some accounts (e.g. created directly in Supabase, or where an
+    // early signup was interrupted before the profile insert) have an auth user
+    // but NO user_profiles row. Previously this 404'd every time the user opened
+    // their profile screen ("works for some users but not others"). Create the
+    // missing row on the fly from the verified JWT, then continue.
+    if (!data) {
+      const { data: created, error: createErr } = await req.supabase
+        .from('user_profiles')
+        .upsert(
+          { id: req.user.id, email: req.user.email, onboarding_completed: false },
+          { onConflict: 'id' },
+        )
+        .select()
+        .maybeSingle();
+      if (createErr) throw createErr;
+      data = created;
+    }
     if (!data) throw new NotFoundError('Profile not found');
 
     const [
@@ -65,13 +84,36 @@ router.patch('/', profileValidators.update, validate, async (req, res, next) => 
       if (req.body[jsKey] !== undefined) updates[dbKey] = req.body[jsKey];
     }
 
+    // PRD-canonical "Settings" fields (validated in profileValidators.update but
+    // previously dropped because they weren't in the `allowed` map above).
+    //
+    // pcosStatus keeps the legacy `hormonal_status` column in sync, and snaps
+    // `pcos_tier` to 'confirmed' when the user self-declares confirmed PCOS — the
+    // same dual-write the onboarding endpoints do.
+    if (req.body.pcosStatus !== undefined) {
+      updates.pcos_status     = req.body.pcosStatus;
+      updates.hormonal_status = mapPcosToHormonal(req.body.pcosStatus);
+      if (req.body.pcosStatus === 'confirmed') updates.pcos_tier = 'confirmed';
+    }
+    // contraceptiveType also stamps contraceptive_changed_at so the engine can
+    // date-bound which cycles are representative after a method change.
+    if (req.body.contraceptiveType !== undefined) {
+      updates.contraceptive_type       = req.body.contraceptiveType;
+      updates.contraceptive_changed_at = new Date().toISOString();
+    }
+
     if (Object.keys(updates).length === 0)
       return success(res, { message: 'No changes provided' });
 
+    // Upsert (not bare update) so the change still persists for accounts whose
+    // user_profiles row is missing — a plain UPDATE matches zero rows there and
+    // silently "doesn't update". `id` + `email` come from the verified JWT.
     const { data, error } = await req.supabase
       .from('user_profiles')
-      .update(updates)
-      .eq('id', req.user.id)
+      .upsert(
+        { id: req.user.id, email: req.user.email, ...updates },
+        { onConflict: 'id' },
+      )
       .select()
       .maybeSingle();
     if (error) throw error;

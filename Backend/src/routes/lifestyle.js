@@ -9,12 +9,23 @@
  */
 import express from 'express';
 import { query, param } from 'express-validator';
-import supabase from '../config/supabase.js';
+import supabase, { supabaseAdmin } from '../config/supabase.js';
 import { validate } from '../middleware/validate.js';
 import { NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 
 const router = express.Router();
+
+// These endpoints are PUBLIC (no JWT). The `lifestyle_articles` RLS policy only
+// grants SELECT to the `authenticated` role, so an anonymous request through the
+// anon client matches NO policy and silently returns ZERO rows — which is why the
+// landing page showed "0 articles" and the lifestyle tip never rendered.
+//
+// We read through the service-role client (which bypasses RLS). The query is
+// always constrained to `is_published = true` and selects only safe public
+// columns, so this is safe. Falls back to the anon client in local dev where no
+// service-role key is configured (and where migration v7 adds an anon policy).
+const readClient = supabaseAdmin || supabase;
 
 // GET /api/v1/lifestyle?category=Daily+Habits&search=pcos&limit=10&offset=0
 router.get('/', [
@@ -28,7 +39,7 @@ router.get('/', [
     const offset   = req.query.offset ?? 0;
     const { category, search } = req.query;
 
-    let q = supabase
+    let q = readClient
       .from('lifestyle_articles')
       .select('id, title, summary, image_url, category, read_time, created_at', { count: 'exact' })
       .eq('is_published', true)
@@ -53,7 +64,7 @@ router.get('/:id', [
   param('id').isUUID().withMessage('Invalid article ID'),
 ], validate, async (req, res, next) => {
   try {
-    const { data: article, error } = await supabase
+    const { data: article, error } = await readClient
       .from('lifestyle_articles')
       .select('*')
       .eq('id', req.params.id)

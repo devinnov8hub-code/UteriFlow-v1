@@ -128,6 +128,15 @@ export const api = {
   flagComment:    (id)      => client.patch(`/admin/community/comments/${id}/flag`),
   unflagComment:  (id)      => client.patch(`/admin/community/comments/${id}/unflag`),
   broadcastNotification: (b) => client.post('/admin/notifications/broadcast', b),
+
+  // Lifestyle / Health-Library articles. These appear on the public landing
+  // page (uteriflow.com/articles) and the mobile app once `isPublished` is true.
+  // Backend routes: Backend/src/routes/admin.js (mounted at /api/v1/admin).
+  getArticles:    (p={})  => client.get('/admin/lifestyle',          { params: p }),
+  getArticle:     (id)    => client.get(`/admin/lifestyle/${id}`),
+  createArticle:  (b)     => client.post('/admin/lifestyle',         b),
+  updateArticle:  (id, b) => client.patch(`/admin/lifestyle/${id}`,  b),
+  deleteArticle:  (id)    => client.delete(`/admin/lifestyle/${id}`),
 }
 
 export default api
