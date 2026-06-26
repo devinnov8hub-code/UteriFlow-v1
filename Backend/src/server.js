@@ -135,6 +135,16 @@ app.use((err, req, res, next) => {
 
   if (err instanceof AppError) return errResponse(err.statusCode, err.message, err.code || 'ERROR');
 
+  // Safety net: a Supabase Auth "email already taken" error must surface as a
+  // clean 409 EMAIL_EXISTS, not get swallowed by the generic DB-error mask below.
+  const emailTaken =
+    err?.code === 'email_exists' ||
+    err?.code === 'email_address_already_exists' ||
+    /already (been )?registered/i.test(err?.message || '');
+  if (emailTaken) {
+    return errResponse(409, 'An account with this email already exists. Please log in instead.', 'EMAIL_EXISTS');
+  }
+
   const isSupabaseError = err?.message && (err.code || err.details || err.hint);
   if (isSupabaseError) {
     console.error('[Supabase Error]', { message: err.message, code: err.code, details: err.details });

@@ -1,6 +1,6 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import supabase, { supabaseAdmin } from '../config/supabase.js';
+import supabase, { supabaseAdmin, getSupabaseAdmin } from '../config/supabase.js';
 import { validate } from '../middleware/validate.js';
 import { authValidators } from '../validators/index.js';
 import { generateOTP, isOTPExpired, getOTPExpiryTime, hasExceededAttempts } from '../utils/otp.js';
@@ -27,6 +27,63 @@ const withPurpose = (query, purpose) => {
   return query.eq('purpose', purpose);
 };
 
+// True if a Supabase Auth error means "this email is already taken".
+const isEmailExistsError = (err) => {
+  if (!err) return false;
+  const code = (err.code || '').toLowerCase();
+  const msg = (err.message || '').toLowerCase();
+  return (
+    code === 'email_exists' ||
+    code === 'email_address_already_exists' ||
+    msg.includes('already been registered') ||
+    msg.includes('already registered') ||
+    msg.includes('already exists')
+  );
+};
+
+// Returns true if `email` already belongs to a registered account.
+// Checks user_profiles first (fast — covers fully onboarded users), then
+// falls back to Supabase Auth (covers "orphaned" auth users whose profile
+// row was never created). Never throws — failures are logged and treated as
+// "not found" so a transient lookup error can't block a legitimate signup.
+const emailAlreadyRegistered = async (email) => {
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+    if (profileError) {
+      console.error('[emailAlreadyRegistered] profile lookup error:', profileError.message);
+    }
+    if (profile) return true;
+  } catch (e) {
+    console.error('[emailAlreadyRegistered] profile lookup threw:', e.message);
+  }
+
+  const admin = getSupabaseAdmin();
+  if (admin) {
+    try {
+      const lower = email.toLowerCase();
+      const perPage = 1000;
+      for (let page = 1; page <= 10; page++) {
+        const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+        if (error) {
+          console.error('[emailAlreadyRegistered] listUsers error:', error.message);
+          break;
+        }
+        const users = data?.users || [];
+        if (users.some((u) => (u.email || '').toLowerCase() === lower)) return true;
+        if (users.length < perPage) break; // last page reached
+      }
+    } catch (e) {
+      console.error('[emailAlreadyRegistered] auth fallback failed:', e.message);
+    }
+  }
+
+  return false;
+};
+
 router.post('/email/check', authValidators.email, validate, async (req, res, next) => {
   try {
     const { email } = req.body;
@@ -43,6 +100,17 @@ router.post('/email/check', authValidators.email, validate, async (req, res, nex
 router.post('/email/send-otp', authValidators.email, validate, async (req, res, next) => {
   try {
     const { email } = req.body;
+
+    // Onboarding OTP is only for NEW users. If this email already belongs to
+    // an account, stop here and tell the app to route the user to login.
+    if (await emailAlreadyRegistered(email)) {
+      throw new AppError(
+        'An account with this email already exists. Please log in instead.',
+        409,
+        'EMAIL_EXISTS'
+      );
+    }
+
     const otpCode = generateOTP();
     const expiresAt = getOTPExpiryTime();
 
@@ -131,8 +199,13 @@ router.post('/password/create', authValidators.createPassword, validate, async (
     if (verifyError) throw verifyError;
     if (!verification) throw new ValidationError('Email has not been verified. Please complete OTP verification first.');
 
-    const { data: existingProfile } = await supabase.from('user_profiles').select('id').eq('email', email).maybeSingle();
-    if (existingProfile) throw new ConflictError('An account with this email already exists. Please log in instead.');
+    if (await emailAlreadyRegistered(email)) {
+      throw new AppError(
+        'An account with this email already exists. Please log in instead.',
+        409,
+        'EMAIL_EXISTS'
+      );
+    }
 
     let user, session;
 
@@ -140,14 +213,19 @@ router.post('/password/create', authValidators.createPassword, validate, async (
       const { data: adminData, error: adminError } = await supabaseAdmin.auth.admin.createUser({
         email, password, email_confirm: true, user_metadata: { email_verified: true },
       });
-      if (adminError) throw adminError;
+      if (adminError) {
+        if (isEmailExistsError(adminError)) {
+          throw new AppError('An account with this email already exists. Please log in instead.', 409, 'EMAIL_EXISTS');
+        }
+        throw adminError;
+      }
       user = adminData?.user;
       const { error: profileError } = await supabaseAdmin.from('user_profiles').insert({ id: user.id, email, onboarding_completed: false });
       if (profileError) throw profileError;
     } else {
       const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password, options: { data: { email_verified: true } } });
       if (signUpError) {
-        if (signUpError.message?.toLowerCase().includes('already registered')) throw new ConflictError('An account with this email already exists.');
+        if (isEmailExistsError(signUpError)) throw new AppError('An account with this email already exists. Please log in instead.', 409, 'EMAIL_EXISTS');
         throw signUpError;
       }
       user = authData?.user;
