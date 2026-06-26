@@ -270,6 +270,10 @@ export const notificationValidators = {
       .withMessage('deviceType must be ios, android or web'),
   ],
   unregisterToken: [
-    body('token').trim().notEmpty().withMessage('token is required').isLength({ max: 4096 }),
+    // token is OPTIONAL: when omitted, the endpoint removes ALL of the
+    // authenticated user's device tokens (the normal "log me out" case). When a
+    // specific token is given, only that one device is removed.
+    body('token').optional().trim().notEmpty().withMessage('token cannot be empty')
+      .isLength({ max: 4096 }),
   ],
 };

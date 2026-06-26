@@ -133,21 +133,29 @@ router.post('/token', notificationValidators.registerToken, validate, async (req
   } catch (error) { next(error); }
 });
 
-// DELETE /api/v1/notifications/token   body: { token }
+// DELETE /api/v1/notifications/token   body: { token? }
+// - No body / no token  → removes ALL of this user's device tokens (logout).
+// - { token }           → removes just that one device.
+// Either way it's scoped to the authenticated user, so a refreshed/mismatched
+// token never leaves a stale row behind on logout.
 router.delete('/token', notificationValidators.unregisterToken, validate, async (req, res, next) => {
   try {
-    const { token } = req.body;
+    const token = req.body?.token;
     const writeClient = supabaseAdmin || req.supabase;
 
-    // Only delete a token that belongs to the requesting user.
-    const { error } = await writeClient
+    let q = writeClient
       .from('user_fcm_tokens')
       .delete()
-      .eq('token', token)
       .eq('user_id', req.user.id);
+    if (token) q = q.eq('token', token);   // narrow to one device only if given
+
+    const { data, error } = await q.select('id');
     if (error) throw error;
 
-    return success(res, { message: 'Device unregistered from push notifications' });
+    return success(res, {
+      message: 'Device(s) unregistered from push notifications',
+      removed: (data ?? []).length,
+    });
   } catch (error) { next(error); }
 });
 
