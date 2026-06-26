@@ -264,4 +264,12 @@ export const notificationValidators = {
     query('offset').optional().isInt({ min: 0 }).toInt(),
     query('unread_only').optional().isBoolean().toBoolean(),
   ],
+  registerToken: [
+    body('token').trim().notEmpty().withMessage('token is required').isLength({ max: 4096 }),
+    body('deviceType').optional().isIn(['ios', 'android', 'web'])
+      .withMessage('deviceType must be ios, android or web'),
+  ],
+  unregisterToken: [
+    body('token').trim().notEmpty().withMessage('token is required').isLength({ max: 4096 }),
+  ],
 };

@@ -6,6 +6,7 @@ import { body, param, query } from 'express-validator';
 import { AppError, NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 import { rangeOrEmpty } from '../utils/pagination.js';
+import { sendPushToUsers } from '../utils/push.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -305,7 +306,23 @@ router.post('/notifications/broadcast', [
     const { error } = await supabaseAdmin.from('notifications').insert(rows);
     if (error) throw error;
 
-    return success(res, { message: `Notification sent to ${targets.length} user(s)` });
+    // Best-effort push to all targeted users' devices. Never let a push failure
+    // fail the request — the in-app notification has already been saved above.
+    let push = { sent: 0, failed: 0, skipped: true };
+    try {
+      push = await sendPushToUsers(supabaseAdmin, targets, {
+        title,
+        body: bodyText,
+        data: { type, kind: 'broadcast' },
+      });
+    } catch (e) {
+      console.warn('[admin/broadcast] push failed:', e.message);
+    }
+
+    return success(res, {
+      message: `Notification sent to ${targets.length} user(s)`,
+      push,
+    });
   } catch (error) { next(error); }
 });
 
