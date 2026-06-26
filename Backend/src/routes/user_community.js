@@ -10,6 +10,7 @@ import { validate } from '../middleware/validate.js';
 import { communityValidators } from '../validators/index.js';
 import { NotFoundError, AppError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(authenticateUser);
@@ -83,19 +84,23 @@ router.get('/posts', pagination, validate, async (req, res, next) => {
     const { category } = req.query;
     const userId   = req.user.id;
 
-    let q = req.supabase
-      .from('posts')
-      .select('*', { count: 'exact' })
-      .eq('is_published', true)
+    const applyFilters = (qb) => {
+      qb = qb.eq('is_published', true);
+      if (category) qb = qb.eq('category', category);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      req.supabase.from('posts').select('*', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (category) q = q.eq('category', category);
+    const { rows: rawPosts, total: count } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(req.supabase.from('posts').select('id', { count: 'exact', head: true }))
+    );
 
-    const { data: rawPosts, count, error } = await q;
-    if (error) throw error;
-
-    const posts = await enrichPosts(req.supabase, rawPosts ?? [], userId);
+    const posts = await enrichPosts(req.supabase, rawPosts, userId);
     return success(res, { posts, pagination: { total: count, limit, offset, returned: posts.length } });
   } catch (error) { next(error); }
 });
@@ -229,15 +234,18 @@ router.get('/bookmarks', pagination, validate, async (req, res, next) => {
     const limit  = req.query.limit  ?? 20;
     const offset = req.query.offset ?? 0;
 
-    const { data: bookmarks, count, error } = await req.supabase
+    const bmQuery = req.supabase
       .from('post_bookmarks')
       .select('post_id', { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (error) throw error;
 
-    const postIds = (bookmarks ?? []).map(b => b.post_id);
+    const { rows: bookmarks, total: count } = await rangeOrEmpty(bmQuery, () =>
+      req.supabase.from('post_bookmarks').select('post_id', { count: 'exact', head: true }).eq('user_id', userId)
+    );
+
+    const postIds = bookmarks.map(b => b.post_id);
     if (postIds.length === 0) return success(res, { posts: [], pagination: { total: 0, limit, offset } });
 
     const { data: rawPosts } = await req.supabase.from('posts').select('*').in('id', postIds).eq('is_published', true);

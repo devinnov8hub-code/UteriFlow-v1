@@ -9,6 +9,7 @@ import { validate } from '../middleware/validate.js';
 import { body, param, query } from 'express-validator';
 import { AppError, NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 
 const router = express.Router();
 
@@ -79,25 +80,28 @@ router.get('/posts', [
     const offset = req.query.offset ?? 0;
     const { category, search } = req.query;
 
-    let q = supabaseAdmin
-      .from('posts')
-      .select('*', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (category === 'flagged') {
+        qb = qb.eq('is_flagged', true);
+      } else if (category) {
+        qb = qb.eq('category', category);
+      }
+      if (search) qb = qb.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin.from('posts').select('*', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (category === 'flagged') {
-      q = q.eq('is_flagged', true);
-    } else if (category) {
-      q = q.eq('category', category);
-    }
-
-    if (search) q = q.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
-
-    const { data: rawPosts, count, error } = await q;
-    if (error) throw error;
+    const { rows: rawPosts, total: count } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('posts').select('id', { count: 'exact', head: true }))
+    );
 
     // Manual author enrichment (no direct FK between posts and user_profiles)
-    const posts = await enrichPostsWithAuthors(rawPosts ?? []);
+    const posts = await enrichPostsWithAuthors(rawPosts);
 
     // Attach likes & comment counts
     const postIds = posts.map(p => p.id);
@@ -223,15 +227,18 @@ router.get('/posts/:id/comments', [...uuidParam, ...paginationV], validate, asyn
     const limit  = req.query.limit  ?? 50;
     const offset = req.query.offset ?? 0;
 
-    const { data: rawComments, count, error } = await supabaseAdmin
+    const commentsQuery = supabaseAdmin
       .from('comments')
       .select('*', { count: 'exact' })
       .eq('post_id', req.params.id)
       .order('created_at', { ascending: true })
       .range(offset, offset + limit - 1);
-    if (error) throw error;
 
-    const comments = await enrichCommentsWithAuthors(rawComments ?? []);
+    const { rows: rawComments, total: count } = await rangeOrEmpty(commentsQuery, () =>
+      supabaseAdmin.from('comments').select('id', { count: 'exact', head: true }).eq('post_id', req.params.id)
+    );
+
+    const comments = await enrichCommentsWithAuthors(rawComments);
     return success(res, { comments, pagination: { total: count, limit, offset } });
   } catch (error) { next(error); }
 });

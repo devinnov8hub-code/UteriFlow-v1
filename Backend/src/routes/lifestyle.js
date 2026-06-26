@@ -13,6 +13,7 @@ import supabase, { supabaseAdmin } from '../config/supabase.js';
 import { validate } from '../middleware/validate.js';
 import { NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 
 const router = express.Router();
 
@@ -39,22 +40,31 @@ router.get('/', [
     const offset   = req.query.offset ?? 0;
     const { category, search } = req.query;
 
-    let q = readClient
-      .from('lifestyle_articles')
-      .select('id, title, summary, image_url, category, read_time, created_at', { count: 'exact' })
-      .eq('is_published', true)
+    // Apply identical filters to any query builder (data query + fallback count).
+    const applyFilters = (qb) => {
+      qb = qb.eq('is_published', true);
+      if (category) qb = qb.eq('category', category);
+      if (search)   qb = qb.ilike('title', `%${search}%`);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      readClient
+        .from('lifestyle_articles')
+        .select('id, title, summary, image_url, category, read_time, created_at', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (category) q = q.eq('category', category);
-    if (search)   q = q.ilike('title', `%${search}%`);
-
-    const { data: articles, count, error } = await q;
-    if (error) throw error;
+    // Paging past the end (e.g. offset=10 with 5 articles) returns an empty page,
+    // not a 500. See utils/pagination.js.
+    const { rows: articles, total } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(readClient.from('lifestyle_articles').select('id', { count: 'exact', head: true }))
+    );
 
     return success(res, {
-      articles: articles ?? [],
-      pagination: { total: count, limit, offset, returned: (articles ?? []).length },
+      articles,
+      pagination: { total, limit, offset, returned: articles.length },
     });
   } catch (error) { next(error); }
 });

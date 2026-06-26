@@ -9,6 +9,7 @@ import { validate } from '../middleware/validate.js';
 import { notificationValidators } from '../validators/index.js';
 import { NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 import { param } from 'express-validator';
 
 const router = express.Router();
@@ -22,17 +23,21 @@ router.get('/', notificationValidators.pagination, validate, async (req, res, ne
     const offset     = req.query.offset     ?? 0;
     const unreadOnly = req.query.unread_only ?? false;
 
-    let q = req.supabase
-      .from('notifications')
-      .select('*', { count: 'exact' })
-      .eq('user_id', userId)
+    const applyFilters = (qb) => {
+      qb = qb.eq('user_id', userId);
+      if (unreadOnly) qb = qb.eq('is_read', false);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      req.supabase.from('notifications').select('*', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (unreadOnly) q = q.eq('is_read', false);
-
-    const { data, count, error } = await q;
-    if (error) throw error;
+    const { rows: data, total: count } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(req.supabase.from('notifications').select('id', { count: 'exact', head: true }))
+    );
 
     const { count: unreadCount } = await req.supabase
       .from('notifications')

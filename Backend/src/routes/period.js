@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.js';
 import { periodValidators } from '../validators/index.js';
 import { NotFoundError, ConflictError, AppError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 import {
   cycleStats, avgBleedLength, classifyUserType, calculatePhase,
   inferPhaseFromSymptoms, evaluatePcosFlags, computePcosTier,
@@ -419,13 +420,16 @@ router.get('/logs', periodValidators.pagination, validate, async (req, res, next
     const limit  = req.query.limit  ?? 10;
     const offset = req.query.offset ?? 0;
 
-    const { data, error, count } = await req.supabase
+    const logsQuery = req.supabase
       .from('period_logs')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
       .order('start_date', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (error) throw error;
+
+    const { rows: data, total: count } = await rangeOrEmpty(logsQuery, () =>
+      req.supabase.from('period_logs').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+    );
 
     return success(res, { periodLogs: data, total: count, limit, offset });
   } catch (error) { next(error); }
@@ -597,15 +601,18 @@ router.get('/symptoms', periodValidators.pagination, validate, async (req, res, 
     const limit  = req.query.limit  ?? 30;
     const offset = req.query.offset ?? 0;
 
-    const { data, count, error } = await req.supabase
+    const symptomsQuery = req.supabase
       .from('period_symptoms')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
       .order('logged_date', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (error) throw error;
 
-    return success(res, { symptoms: data ?? [], total: count ?? 0, limit, offset });
+    const { rows: data, total: count } = await rangeOrEmpty(symptomsQuery, () =>
+      req.supabase.from('period_symptoms').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+    );
+
+    return success(res, { symptoms: data, total: count, limit, offset });
   } catch (error) { next(error); }
 });
 

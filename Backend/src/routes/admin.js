@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.js';
 import { body, param, query } from 'express-validator';
 import { AppError, NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { rangeOrEmpty } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -83,29 +84,34 @@ router.get('/users', [
     const offset = req.query.offset ?? 0;
     const { search, onboarding_completed } = req.query;
 
-    let q = supabaseAdmin
-      .from('user_profiles')
-      .select('*', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (search)                             qb = qb.or(`email.ilike.%${search}%,display_name.ilike.%${search}%`);
+      if (onboarding_completed !== undefined) qb = qb.eq('onboarding_completed', onboarding_completed);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin.from('user_profiles').select('*', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (search)                          q = q.or(`email.ilike.%${search}%,display_name.ilike.%${search}%`);
-    if (onboarding_completed !== undefined) q = q.eq('onboarding_completed', onboarding_completed);
+    const { rows: data, total: count } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('user_profiles').select('id', { count: 'exact', head: true }))
+    );
 
-    const { data, count, error } = await q;
-    if (error) throw error;
-
-    
-    const userIds = (data ?? []).map(u => u.id);
-    const { data: bans } = await supabaseAdmin
-      .from('user_bans')
-      .select('user_id, ban_type, banned_until')
-      .in('user_id', userIds);
+    const userIds = data.map(u => u.id);
+    const { data: bans } = userIds.length
+      ? await supabaseAdmin
+          .from('user_bans')
+          .select('user_id, ban_type, banned_until')
+          .in('user_id', userIds)
+      : { data: [] };
 
     const banMap = {};
     for (const b of (bans ?? [])) banMap[b.user_id] = b;
 
-    const users = (data ?? []).map(u => ({
+    const users = data.map(u => ({
       ...u,
       ban: banMap[u.id] ?? null,
     }));
@@ -208,18 +214,22 @@ router.get('/period-logs', [
     const offset = req.query.offset ?? 0;
     const { user_id } = req.query;
 
-    let q = supabaseAdmin
-      .from('period_logs')
-      .select('*', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (user_id) qb = qb.eq('user_id', user_id);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin.from('period_logs').select('*', { count: 'exact' })
+    )
       .order('start_date', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (user_id) q = q.eq('user_id', user_id);
+    const { rows, total } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('period_logs').select('id', { count: 'exact', head: true }))
+    );
 
-    const { data, count, error } = await q;
-    if (error) throw error;
-
-    return success(res, { periodLogs: data, pagination: { total: count, limit, offset, returned: data.length } });
+    return success(res, { periodLogs: rows, pagination: { total, limit, offset, returned: rows.length } });
   } catch (error) { next(error); }
 });
 
@@ -317,20 +327,26 @@ router.get('/newsletter', [
     const offset = req.query.offset ?? 0;
     const { search } = req.query;
 
-    let q = supabaseAdmin
-      .from('newsletter_subscribers')
-      .select('id, email, source, ip, user_agent, created_at', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (search) qb = qb.ilike('email', `%${search}%`);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin
+        .from('newsletter_subscribers')
+        .select('id, email, source, ip, user_agent, created_at', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (search) q = q.ilike('email', `%${search}%`);
-
-    const { data, count, error } = await q;
-    if (error) throw error;
+    const { rows, total } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('newsletter_subscribers').select('id', { count: 'exact', head: true }))
+    );
 
     return success(res, {
-      subscribers: data ?? [],
-      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+      subscribers: rows,
+      pagination: { total, limit, offset, returned: rows.length },
     });
   } catch (error) { next(error); }
 });
@@ -360,20 +376,26 @@ router.get('/waitlist', [
     const offset = req.query.offset ?? 0;
     const { search } = req.query;
 
-    let q = supabaseAdmin
-      .from('waitlist_entries')
-      .select('id, name, email, source, ip, user_agent, created_at', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (search) qb = qb.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin
+        .from('waitlist_entries')
+        .select('id, name, email, source, ip, user_agent, created_at', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (search) q = q.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
-
-    const { data, count, error } = await q;
-    if (error) throw error;
+    const { rows, total } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('waitlist_entries').select('id', { count: 'exact', head: true }))
+    );
 
     return success(res, {
-      entries: data ?? [],
-      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+      entries: rows,
+      pagination: { total, limit, offset, returned: rows.length },
     });
   } catch (error) { next(error); }
 });
@@ -449,23 +471,29 @@ router.get('/lifestyle', [
     const offset = req.query.offset ?? 0;
     const { search, category, status } = req.query;
 
-    let q = supabaseAdmin
-      .from('lifestyle_articles')
-      .select('id, title, summary, image_url, category, read_time, is_published, created_at, updated_at', { count: 'exact' })
+    const applyFilters = (qb) => {
+      if (category) qb = qb.eq('category', category);
+      if (status === 'published') qb = qb.eq('is_published', true);
+      if (status === 'draft')     qb = qb.eq('is_published', false);
+      if (search)   qb = qb.ilike('title', `%${search}%`);
+      return qb;
+    };
+
+    const dataQuery = applyFilters(
+      supabaseAdmin
+        .from('lifestyle_articles')
+        .select('id, title, summary, image_url, category, read_time, is_published, created_at, updated_at', { count: 'exact' })
+    )
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (category) q = q.eq('category', category);
-    if (status === 'published') q = q.eq('is_published', true);
-    if (status === 'draft')     q = q.eq('is_published', false);
-    if (search)   q = q.ilike('title', `%${search}%`);
-
-    const { data, count, error } = await q;
-    if (error) throw error;
+    const { rows, total } = await rangeOrEmpty(dataQuery, () =>
+      applyFilters(supabaseAdmin.from('lifestyle_articles').select('id', { count: 'exact', head: true }))
+    );
 
     return success(res, {
-      articles: data ?? [],
-      pagination: { total: count, limit, offset, returned: (data ?? []).length },
+      articles: rows,
+      pagination: { total, limit, offset, returned: rows.length },
     });
   } catch (error) { next(error); }
 });
