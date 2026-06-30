@@ -200,7 +200,7 @@ export const periodValidators = {
         return true;
       }),
     body('logId').optional({ nullable: true }).isUUID().withMessage('logId must be a valid UUID'),
-    body('symptoms').isArray().withMessage('symptoms must be an array'),
+    body('symptoms').optional().isArray().withMessage('symptoms must be an array'),
     body('symptoms.*').isIn(ALLOWED_SYMPTOMS).withMessage('One or more invalid symptom values'),
     body('flowLevel').optional({ nullable: true })
       .isIn(['spotting', 'light', 'medium', 'heavy', 'very_heavy']).withMessage('Invalid flow level'),
@@ -218,6 +218,30 @@ export const periodValidators = {
       'none', 'combined_pill', 'mini_pill', 'hormonal_iud',
       'implant', 'injectable', 'other_hormonal', 'prefer_not_to_say',
     ]).withMessage('Invalid contraceptive type'),
+    // Every field above is optional on its own, but a log must contain SOMETHING.
+    // Reject a payload where none of the loggable fields carry a value, so we
+    // never persist an empty entry. (loggedDate / logId are metadata and don't
+    // count as content.) painLevel === 0 is a real value and counts.
+    body().custom((_value, { req }) => {
+      const b = req.body || {};
+      const present = (v) =>
+        v !== undefined &&
+        v !== null &&
+        !(typeof v === 'string' && v.trim() === '') &&
+        !(Array.isArray(v) && v.length === 0);
+      const hasContent =
+        present(b.symptoms) ||
+        present(b.flowLevel) ||
+        present(b.discharge) ||
+        present(b.mood) ||
+        present(b.painLevel) ||
+        present(b.notes) ||
+        present(b.contraceptiveType);
+      if (!hasContent) {
+        throw new Error('A log must include at least one detail: symptoms, flow level, discharge, mood, pain level, notes, or contraceptive type.');
+      }
+      return true;
+    }),
   ],
 };
 
