@@ -137,18 +137,29 @@ app.use((err, req, res, next) => {
 
   // Safety net: a Supabase Auth "email already taken" error must surface as a
   // clean 409 EMAIL_EXISTS, not get swallowed by the generic DB-error mask below.
+  // We inspect message + details + hint because a duplicate signup can arrive as
+  // a raw Postgres unique-violation (code "23505") whose "already exists" wording
+  // sits in `details`, not `message`. We scope the 23505 case to the email/users
+  // key so we never mislabel some *other* duplicate row (e.g. an FCM token).
+  const dupText = [err?.message, err?.details, err?.hint].filter(Boolean).join(' ');
   const emailTaken =
-    err?.code === 'email_exists' ||
-    err?.code === 'email_address_already_exists' ||
-    /already (been )?registered/i.test(err?.message || '');
+    ['email_exists', 'email_address_already_exists', 'user_already_exists'].includes(err?.code) ||
+    /already (been )?registered/i.test(dupText) ||
+    // A duplicate/unique-violation that clearly references the email column.
+    // Scoped to /email/ so an unrelated duplicate (FCM token, post like, etc.)
+    // is never mislabeled as "email already exists".
+    ((/already exists/i.test(dupText) || /duplicate key/i.test(dupText)) && /email/i.test(dupText)) ||
+    (err?.code === '23505' && /email/i.test(dupText));
   if (emailTaken) {
     return errResponse(409, 'An account with this email already exists. Please log in instead.', 'EMAIL_EXISTS');
   }
 
   const isSupabaseError = err?.message && (err.code || err.details || err.hint);
   if (isSupabaseError) {
-    console.error('[Supabase Error]', { message: err.message, code: err.code, details: err.details });
-    return errResponse(500, 'A database error occurred.', 'DATABASE_ERROR');
+    // Full details go to the server log for debugging; the user gets a clear,
+    // non-technical message (never a raw "database error").
+    console.error('[Supabase Error]', { message: err.message, code: err.code, details: err.details, hint: err.hint });
+    return errResponse(500, 'Something went wrong on our end. Please try again in a moment.', 'DATABASE_ERROR');
   }
 
   console.error('[Unhandled Error]', err);

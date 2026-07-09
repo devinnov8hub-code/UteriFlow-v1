@@ -27,18 +27,43 @@ const withPurpose = (query, purpose) => {
   return query.eq('purpose', purpose);
 };
 
-// True if a Supabase Auth error means "this email is already taken".
+// True if a Supabase/Postgres error means "this email is already taken".
+// We look at message, details, hint AND error_description because a duplicate
+// signup can arrive in several shapes depending on the GoTrue / Postgres path:
+//   • clean Auth error   → code "email_exists" / message "already registered"
+//   • raw unique violation → code "23505", message "duplicate key value violates
+//     unique constraint ...users_email_key", and the "already exists" wording
+//     lives in `details` ("Key (email)=(x) already exists."), NOT `message`.
+// The old matcher only checked `message`, so the unique-violation shape slipped
+// through and got masked as a generic "database error" on the app.
 const isEmailExistsError = (err) => {
   if (!err) return false;
   const code = (err.code || '').toLowerCase();
-  const msg = (err.message || '').toLowerCase();
+  const text = [err.message, err.details, err.hint, err.error_description]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
   return (
     code === 'email_exists' ||
     code === 'email_address_already_exists' ||
-    msg.includes('already been registered') ||
-    msg.includes('already registered') ||
-    msg.includes('already exists')
+    code === 'user_already_exists' ||
+    text.includes('already been registered') ||
+    text.includes('already registered') ||
+    text.includes('already exists') ||
+    // Unique-violation on the auth users email — only when it clearly points at
+    // the email/users key, so we never mislabel some other duplicate row.
+    ((code === '23505' || text.includes('duplicate key')) &&
+      (text.includes('users_email') || text.includes('email') || text.includes('users')))
   );
+};
+
+// True for any Postgres unique-violation (duplicate row). Used to make an
+// already-existing profile row on retry a no-op instead of a hard failure.
+const isDuplicateRow = (err) => {
+  if (!err) return false;
+  const code = (err.code || '').toLowerCase();
+  const msg = (err.message || '').toLowerCase();
+  return code === '23505' || msg.includes('duplicate key');
 };
 
 // Returns true if `email` already belongs to a registered account.
@@ -221,7 +246,9 @@ router.post('/password/create', authValidators.createPassword, validate, async (
       }
       user = adminData?.user;
       const { error: profileError } = await supabaseAdmin.from('user_profiles').insert({ id: user.id, email, onboarding_completed: false });
-      if (profileError) throw profileError;
+      // A duplicate here means the profile row already exists for this user
+      // (e.g. a retried signup) — that's fine, not a failure. Anything else throws.
+      if (profileError && !isDuplicateRow(profileError)) throw profileError;
     } else {
       const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password, options: { data: { email_verified: true } } });
       if (signUpError) {
@@ -234,7 +261,8 @@ router.post('/password/create', authValidators.createPassword, validate, async (
       if (session?.access_token) {
         const authedClient = getAuthedClient(session.access_token);
         const { error: profileError } = await authedClient.from('user_profiles').insert({ id: user.id, email, onboarding_completed: false });
-        if (profileError) throw profileError;
+        // Duplicate profile row on retry is harmless — ignore it, throw the rest.
+        if (profileError && !isDuplicateRow(profileError)) throw profileError;
       }
     }
 
