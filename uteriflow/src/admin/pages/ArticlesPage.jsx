@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { BookOpen, Plus, Search, Trash2, Pencil, Eye, EyeOff, X } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { BookOpen, Plus, Search, Trash2, Pencil, Eye, EyeOff, X, UploadCloud, Link2, Loader2, ImageIcon } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import toast from 'react-hot-toast'
 import api from '../api'
@@ -292,8 +292,11 @@ function EditorModal({ draft, setDraft, onClose, onSave, saving }) {
             </Field>
           </div>
 
-          <Field label="Cover image URL (optional)">
-            <input value={draft.imageUrl} onChange={e => set('imageUrl', e.target.value)} placeholder="https://…" style={inp} maxLength={1000} />
+          <Field label="Cover image (optional)">
+            <CoverImageField
+              value={draft.imageUrl}
+              onChange={v => set('imageUrl', v)}
+            />
           </Field>
 
           <Field label="Content">
@@ -319,6 +322,207 @@ function EditorModal({ draft, setDraft, onClose, onSave, saving }) {
       </div>
     </div>
   )
+}
+
+/**
+ * CoverImageField
+ * ---------------
+ * Replaces the old "paste an image URL" input, which kept failing because:
+ *   • Google Drive / Dropbox share links point at an HTML preview page, not an
+ *     actual image file, so the <img> tag rendered nothing.
+ *   • Hotlinked URLs expire or block embedding from another domain.
+ *
+ * Admins can now:
+ *   1. Upload straight from their device (click or drag & drop)
+ *   2. Paste a link — including a Google Drive / Dropbox / OneDrive share link.
+ *      The backend downloads it and re-hosts it in our own Supabase bucket, so
+ *      the cover keeps working forever.
+ *
+ * Either way, `value` ends up as a permanent public URL from our own storage.
+ */
+const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const MAX_MB   = 5
+
+function CoverImageField({ value, onChange }) {
+  const [tab, setTab]           = useState('upload')   // 'upload' | 'link'
+  const [busy, setBusy]         = useState(false)
+  const [link, setLink]         = useState('')
+  const [dragging, setDragging] = useState(false)
+  const [broken, setBroken]     = useState(false)
+  const fileRef = useRef(null)
+
+  const handleFile = async (file) => {
+    if (!file) return
+    if (!ACCEPTED.includes(file.type)) {
+      toast.error('Please choose a JPG, PNG, WEBP or GIF image.')
+      return
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      toast.error(`That image is ${(file.size / 1024 / 1024).toFixed(1)} MB. Maximum size is ${MAX_MB} MB.`)
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await api.uploadArticleImage(file)
+      if (!res?.url) throw new Error('Upload did not return an image URL.')
+      setBroken(false)
+      onChange(res.url)
+      toast.success('Cover image uploaded')
+    } catch (e) {
+      toast.error(e.message || 'Image upload failed. Please try again.')
+    } finally {
+      setBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const handleImport = async () => {
+    const url = link.trim()
+    if (!url) { toast.error('Paste an image link first.'); return }
+    setBusy(true)
+    try {
+      const res = await api.importArticleImage(url)
+      if (!res?.url) throw new Error('Import did not return an image URL.')
+      setBroken(false)
+      onChange(res.url)
+      setLink('')
+      toast.success('Cover image imported')
+    } catch (e) {
+      toast.error(e.message || 'Could not import that image.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDrop = (e) => {
+    e.preventDefault()
+    setDragging(false)
+    if (busy) return
+    handleFile(e.dataTransfer.files?.[0])
+  }
+
+  // ── Already has an image → show a preview with a Replace / Remove action ──
+  if (value) {
+    return (
+      <div style={{ border:'1.5px solid var(--gray-200)', borderRadius:'10px', overflow:'hidden', background:'var(--gray-50)' }}>
+        {broken ? (
+          <div style={{ padding:'20px', display:'flex', alignItems:'center', gap:'10px', fontSize:'13px', color:'var(--gray-600)' }}>
+            <ImageIcon size={16} />
+            This image could not be displayed. Try uploading it from your device.
+          </div>
+        ) : (
+          <img
+            src={value}
+            alt="Cover preview"
+            onError={() => setBroken(true)}
+            style={{ width:'100%', height:'180px', objectFit:'cover', display:'block', background:'var(--gray-100)' }}
+          />
+        )}
+        <div style={{ display:'flex', gap:'8px', padding:'10px 12px', borderTop:'1px solid var(--gray-200)', background:'white' }}>
+          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} style={miniBtn}>
+            {busy ? <Loader2 size={13} style={{ animation:'spin 0.7s linear infinite' }} /> : <UploadCloud size={13} />}
+            {busy ? 'Uploading…' : 'Replace'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => { onChange(''); setBroken(false) }}
+            style={{ ...miniBtn, color:'var(--red)', marginLeft:'auto' }}
+          >
+            <Trash2 size={13} /> Remove
+          </button>
+        </div>
+        <input ref={fileRef} type="file" accept={ACCEPTED.join(',')} onChange={e => handleFile(e.target.files?.[0])} style={{ display:'none' }} />
+      </div>
+    )
+  }
+
+  // ── No image yet → upload / link tabs ────────────────────────────────────
+  return (
+    <div>
+      <div style={{ display:'flex', gap:'6px', marginBottom:'10px' }}>
+        <TabBtn active={tab === 'upload'} onClick={() => setTab('upload')}><UploadCloud size={13} /> Upload from device</TabBtn>
+        <TabBtn active={tab === 'link'}   onClick={() => setTab('link')}><Link2 size={13} /> Paste a link</TabBtn>
+      </div>
+
+      {tab === 'upload' ? (
+        <div
+          onClick={() => !busy && fileRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          style={{
+            border: `1.5px dashed ${dragging ? 'var(--purple)' : 'var(--gray-200)'}`,
+            background: dragging ? 'var(--purple-pale)' : 'var(--gray-50)',
+            borderRadius:'10px', padding:'26px 16px', textAlign:'center',
+            cursor: busy ? 'wait' : 'pointer', transition:'all 0.15s',
+          }}
+        >
+          {busy ? (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:'8px', color:'var(--gray-600)', fontSize:'13px' }}>
+              <Loader2 size={15} style={{ animation:'spin 0.7s linear infinite' }} /> Uploading…
+            </div>
+          ) : (
+            <>
+              <UploadCloud size={22} color="var(--purple)" />
+              <div style={{ fontSize:'13px', color:'var(--gray-700)', marginTop:'8px', fontWeight:500 }}>
+                Click to choose an image, or drag it here
+              </div>
+              <div style={{ fontSize:'12px', color:'var(--gray-400)', marginTop:'3px' }}>
+                JPG, PNG, WEBP or GIF · up to {MAX_MB} MB
+              </div>
+            </>
+          )}
+          <input ref={fileRef} type="file" accept={ACCEPTED.join(',')} onChange={e => handleFile(e.target.files?.[0])} style={{ display:'none' }} />
+        </div>
+      ) : (
+        <div>
+          <div style={{ display:'flex', gap:'8px' }}>
+            <input
+              value={link}
+              onChange={e => setLink(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !busy && handleImport()}
+              placeholder="Paste an image or Google Drive link…"
+              style={{ ...inp, flex:1 }}
+              disabled={busy}
+            />
+            <Btn onClick={handleImport} loading={busy} style={{ flexShrink:0 }}>Import</Btn>
+          </div>
+          <div style={{ fontSize:'12px', color:'var(--gray-400)', marginTop:'6px', lineHeight:1.5 }}>
+            Works with Google Drive, Dropbox, OneDrive or any public image link. The image is copied
+            into UteriFlow storage, so it keeps working even if the original link is removed.
+            On Google Drive, set sharing to <strong>“Anyone with the link”</strong> first.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display:'flex', alignItems:'center', gap:'6px', padding:'7px 12px',
+        borderRadius:'8px', fontSize:'12.5px', fontWeight:500, fontFamily:'inherit',
+        cursor:'pointer', transition:'all 0.15s',
+        border: `1.5px solid ${active ? 'var(--purple)' : 'var(--gray-200)'}`,
+        background: active ? 'var(--purple-pale)' : 'white',
+        color: active ? 'var(--purple)' : 'var(--gray-600)',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+const miniBtn = {
+  display:'inline-flex', alignItems:'center', gap:'6px', padding:'6px 10px',
+  borderRadius:'7px', border:'1.5px solid var(--gray-200)', background:'white',
+  fontSize:'12.5px', fontWeight:500, fontFamily:'inherit', cursor:'pointer',
+  color:'var(--gray-700)',
 }
 
 function Field({ label, children, style={} }) {

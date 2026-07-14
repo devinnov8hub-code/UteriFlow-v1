@@ -137,6 +137,22 @@ export const api = {
   createArticle:  (b)     => client.post('/admin/lifestyle',         b),
   updateArticle:  (id, b) => client.patch(`/admin/lifestyle/${id}`,  b),
   deleteArticle:  (id)    => client.delete(`/admin/lifestyle/${id}`),
+
+  // ── Article cover images ────────────────────────────────────────────────
+  // The old flow required admins to paste a raw image URL, which broke for
+  // cloud share links (Google Drive etc.) and expiring hotlinks. Both helpers
+  // below store the image in our own Supabase bucket and return a permanent
+  // public URL, which is what gets saved as the article's imageUrl.
+  //
+  // NOTE: do NOT set Content-Type here — the browser must add the multipart
+  // boundary itself, otherwise the upload body cannot be parsed.
+  uploadArticleImage: (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return client.post('/upload/article-image', form)
+  },
+  // Import from Google Drive / Dropbox / OneDrive / any public image link.
+  importArticleImage: (url) => client.post('/upload/image-from-url', { url }),
 }
 
 export default api
