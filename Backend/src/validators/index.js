@@ -159,16 +159,28 @@ export const ALLOWED_SYMPTOMS = [
 
 
 export const periodValidators = {
+  // NOTE: `.toDate()` is deliberately NOT used on period dates.
+  // A period date is a calendar day, not an instant. Converting
+  // "2026-07-03T00:00:00.000+01:00" to a Date and back yields 2026-07-02 for
+  // anyone east of UTC, which would save the day BEFORE the one the user
+  // tapped. Keeping the raw ISO string lets the route take the stated calendar
+  // day verbatim (see toDayString in routes/period.js).
   logCreate: [
-    body('startDate').isISO8601().toDate().withMessage('startDate must be a valid ISO 8601 date'),
-    body('endDate').optional({ nullable: true }).isISO8601().toDate().withMessage('endDate must be a valid ISO 8601 date'),
+    body('startDate').isISO8601().withMessage('startDate must be a valid ISO 8601 date'),
+    body('endDate').optional({ nullable: true }).isISO8601().withMessage('endDate must be a valid ISO 8601 date'),
     body('notes').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Notes must be at most 1000 characters'),
+    // The mobile app sends `note`; accepted so the value is no longer dropped.
+    body('note').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Notes must be at most 1000 characters'),
+    // Optional: lets a client target an exact period when editing.
+    body('logId').optional({ nullable: true }).isUUID().withMessage('Invalid period log ID'),
+    body('periodLogId').optional({ nullable: true }).isUUID().withMessage('Invalid period log ID'),
   ],
   logUpdate: [
     param('id').isUUID().withMessage('Invalid period log ID'),
-    body('startDate').optional().isISO8601().toDate().withMessage('startDate must be a valid ISO 8601 date'),
-    body('endDate').optional({ nullable: true }).isISO8601().toDate().withMessage('endDate must be a valid ISO 8601 date'),
+    body('startDate').optional().isISO8601().withMessage('startDate must be a valid ISO 8601 date'),
+    body('endDate').optional({ nullable: true }).isISO8601().withMessage('endDate must be a valid ISO 8601 date'),
     body('notes').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Notes must be at most 1000 characters'),
+    body('note').optional({ nullable: true }).trim().isLength({ max: 1000 }).withMessage('Notes must be at most 1000 characters'),
   ],
   logDelete: [param('id').isUUID().withMessage('Invalid period log ID')],
   pagination: [

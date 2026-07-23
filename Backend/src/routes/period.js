@@ -3,7 +3,7 @@ import express from 'express';
 import { authenticateUser } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { periodValidators } from '../validators/index.js';
-import { NotFoundError, ConflictError, AppError } from '../errors/index.js';
+import { NotFoundError, ConflictError, AppError, ValidationError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 import { rangeOrEmpty } from '../utils/pagination.js';
 import {
@@ -383,8 +383,12 @@ async function refreshPredictions(db, userId) {
 
 router.post('/first-log', periodValidators.logCreate, validate, async (req, res, next) => {
   try {
-    const { startDate, notes } = req.body;
+    const startDate = toDayString(req.body.startDate);
+    // Accept `note` as well as `notes` (see the note in POST /log).
+    const notes = req.body.notes !== undefined ? req.body.notes : req.body.note;
     const userId = req.user.id;
+
+    if (!startDate) throw new ValidationError('startDate must be a valid date.');
 
     const { data: existingLog, error: checkError } = await req.supabase
       .from('period_logs')
@@ -410,28 +414,149 @@ router.post('/first-log', periodValidators.logCreate, validate, async (req, res,
 });
 
 
+// POST /period/log
+//
+// Logs a period, OR edits the one the user is already tracking.
+//
+// This used to be a blind INSERT: every save created a brand-new row. The edit
+// screen posts here, so editing a period's start or end date added a SECOND
+// record while the original survived untouched — which is exactly why the old
+// start date kept coming back after an edit, and why repeated edits piled up
+// duplicate periods that skewed the averages and painted overlapping ranges on
+// the calendar.
+//
+// It now resolves the target row first and UPDATES it when the save clearly
+// refers to a period that already exists:
+//
+//   1. an explicit `logId` in the body always wins (precise edit)
+//   2. otherwise, a stored period whose dates overlap or sit adjacent to the
+//      incoming ones is treated as the same period and updated in place
+//   3. only a genuinely new, non-overlapping period is inserted
+//
+// The response shape is unchanged, so existing app builds keep working; they
+// simply stop creating duplicates. `updated` tells newer clients which happened.
 router.post('/log', periodValidators.logCreate, validate, async (req, res, next) => {
   try {
-    const { startDate, endDate, notes } = req.body;
     const userId = req.user.id;
 
-    const { data, error } = await req.supabase
-      .from('period_logs')
-      .insert({
-        user_id: userId,
-        start_date: startDate,
-        end_date: endDate ?? null,
-        notes: notes ?? null,
-        is_first_log: false,
-      })
-      .select()
-      .single();
-    if (error) throw error;
+    const startDate = toDayString(req.body.startDate);
+    const endDate   = toDayString(req.body.endDate);
+    // The app sends `note` (singular) while this API was written for `notes`,
+    // so every note the user typed was being silently discarded. Both spellings
+    // are accepted now; no app release is needed for notes to start saving.
+    const notes     = req.body.notes !== undefined ? req.body.notes : req.body.note;
+    const logId     = req.body.logId ?? req.body.periodLogId ?? null;
 
-    
+    if (!startDate) throw new ValidationError('startDate must be a valid date.');
+    if (endDate && dayDiff(startDate, endDate) < 0) {
+      throw new ValidationError('The period end date cannot be before the start date.');
+    }
+    if (endDate && dayDiff(startDate, endDate) + 1 > 60) {
+      throw new ValidationError('That period is unusually long. Please check the dates.');
+    }
+
+    // ── 1. Explicit edit by id ──────────────────────────────────────────────
+    let target = null;
+    if (logId) {
+      const { data, error } = await req.supabase
+        .from('period_logs')
+        .select('*')
+        .eq('id', logId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new NotFoundError('Period log not found');
+      target = data;
+    }
+
+    // ── 2. Otherwise find the period this save refers to ────────────────────
+    // Look at a window around the incoming dates rather than the whole history,
+    // then pick the best match in JS so the rule stays readable.
+    if (!target) {
+      const windowStart = addDays(startDate, -60);
+      const windowEnd   = addDays(endDate ?? startDate, 60);
+
+      const { data: nearby, error } = await req.supabase
+        .from('period_logs')
+        .select('*')
+        .eq('user_id', userId)
+        .gte('start_date', windowStart)
+        .lte('start_date', windowEnd)
+        .order('start_date', { ascending: false });
+      if (error) throw error;
+
+      const inStart = startDate;
+      const inEnd   = endDate ?? startDate;
+
+      for (const log of (nearby ?? [])) {
+        const exStart = toDayString(log.start_date);
+        const exEnd   = toDayString(log.end_date) ?? exStart;
+        if (!exStart) continue;
+
+        // Same period if the ranges genuinely OVERLAP, or if the start dates
+        // are within a couple of days of each other (the user nudging this
+        // period's start or end).
+        //
+        // Deliberately NOT end-to-start adjacency: a real period beginning the
+        // day after another ended is a SEPARATE period, and treating it as an
+        // edit would silently swallow it. Real data showed periods logged 1 day
+        // apart, so that rule would have merged genuine cycles.
+        const overlaps    = exStart <= inEnd && exEnd >= inStart;
+        const sameishStart = Math.abs(dayDiff(exStart, inStart)) <= 3;
+
+        if (overlaps || sameishStart) { target = log; break; }
+      }
+    }
+
+    let data;
+    if (target) {
+      // ── Edit in place ────────────────────────────────────────────────────
+      const updateData = { start_date: startDate };
+      // Only touch end_date when the client actually sent one, so editing just
+      // the start date can never wipe a previously recorded end date.
+      if (req.body.endDate !== undefined) updateData.end_date = endDate;
+      if (notes !== undefined)            updateData.notes    = notes ?? null;
+
+      const { data: updated, error: updateError } = await req.supabase
+        .from('period_logs')
+        .update(updateData)
+        .eq('id', target.id)
+        .eq('user_id', userId)
+        .select()
+        .maybeSingle();
+      if (updateError) throw updateError;
+      if (!updated)    throw new NotFoundError('Period log not found');
+      data = updated;
+    } else {
+      // ── Genuinely new period ─────────────────────────────────────────────
+      const { data: inserted, error: insertError } = await req.supabase
+        .from('period_logs')
+        .insert({
+          user_id: userId,
+          start_date: startDate,
+          end_date: endDate,
+          notes: notes ?? null,
+          is_first_log: false,
+        })
+        .select()
+        .single();
+      if (insertError) throw insertError;
+      data = inserted;
+    }
+
+    // Predictions and cycle phase are always re-derived from the saved dates,
+    // so the calendar reflects the edit immediately.
     await refreshPredictions(req.supabase, userId).catch(() => {});
 
-    return success(res, { message: 'Period logged successfully', periodLog: data }, 201);
+    return success(
+      res,
+      {
+        message: target ? 'Period updated successfully' : 'Period logged successfully',
+        periodLog: { ...data, duration: periodDuration(data), isOngoing: !data.end_date },
+        updated: Boolean(target),
+      },
+      target ? 200 : 201
+    );
   } catch (error) { next(error); }
 });
 
@@ -525,6 +650,30 @@ router.get('/history', async (req, res, next) => {
     });
   } catch (error) { next(error); }
 });
+
+
+// ─── Calendar-day normalisation ───────────────────────────────────
+// A period date is a CALENDAR DAY, not an instant in time. Clients send values
+// like "2026-07-03T00:00:00.000" or "2026-07-03T00:00:00.000+01:00"; round-
+// tripping those through a Date can shift the day by one for anyone not on UTC
+// (Lagos is UTC+1), silently saving the day *before* the one the user tapped.
+// We therefore take the calendar day exactly as the client stated it.
+function toDayString(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return value.toISOString().slice(0, 10);
+  }
+  const m = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+// Signed day difference between two YYYY-MM-DD strings (b - a).
+function dayDiff(aIso, bIso) {
+  return Math.round(
+    (new Date(`${bIso}T00:00:00Z`) - new Date(`${aIso}T00:00:00Z`)) / 86400000
+  );
+}
 
 
 // ─── Calendar day-state helpers ───────────────────────────────────
@@ -663,8 +812,12 @@ router.get('/calendar', async (req, res, next) => {
 router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { startDate, endDate, notes } = req.body;
+    const notes = req.body.notes !== undefined ? req.body.notes : req.body.note;
     const userId = req.user.id;
+
+    // Calendar days, taken exactly as the client stated them (see toDayString).
+    const startDate = req.body.startDate !== undefined ? toDayString(req.body.startDate) : undefined;
+    const endDate   = req.body.endDate   !== undefined ? toDayString(req.body.endDate)   : undefined;
 
     const updateData = {};
     if (startDate !== undefined) updateData.start_date = startDate;
@@ -673,6 +826,21 @@ router.put('/log/:id', periodValidators.logUpdate, validate, async (req, res, ne
 
     if (Object.keys(updateData).length === 0)
       return success(res, { message: 'No changes provided' });
+
+    // Validate ordering against whatever the row will hold after the update,
+    // so changing only one of the two dates can't leave an inverted range.
+    const { data: current } = await req.supabase
+      .from('period_logs').select('start_date, end_date')
+      .eq('id', id).eq('user_id', userId).maybeSingle();
+    if (!current) throw new NotFoundError('Period log not found');
+
+    const finalStart = updateData.start_date ?? toDayString(current.start_date);
+    const finalEnd   = updateData.end_date !== undefined
+      ? updateData.end_date
+      : toDayString(current.end_date);
+    if (finalStart && finalEnd && dayDiff(finalStart, finalEnd) < 0) {
+      throw new ValidationError('The period end date cannot be before the start date.');
+    }
 
     const { data, error } = await req.supabase
       .from('period_logs')
