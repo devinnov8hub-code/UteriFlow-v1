@@ -256,6 +256,10 @@ export const communityValidators = {
   createComment: [
     body('content').trim().notEmpty().withMessage('Comment content is required').isLength({ max: 2000 }),
     body('parentId').optional({ nullable: true }).isUUID().withMessage('parentId must be a valid UUID'),
+    // Anonymous commenting. Accepts either casing so the mobile client can send
+    // whichever it already uses without a coordinated release.
+    body('isAnonymous').optional().isBoolean().withMessage('isAnonymous must be a boolean').toBoolean(),
+    body('is_anonymous').optional().isBoolean().withMessage('is_anonymous must be a boolean').toBoolean(),
   ],
   reportPost: [
     body('reason').trim().notEmpty().isLength({ max: 500 }).withMessage('Reason is required'),

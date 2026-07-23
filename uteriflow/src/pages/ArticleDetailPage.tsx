@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, Clock, Calendar, BookOpen } from "lucide-react";
+import DOMPurify from "dompurify";
 import { lifestyleService } from "../lib/services/lifestyle.service";
 import type { LifestyleTipDetail } from "../types/lifestyle";
 
@@ -16,6 +17,31 @@ import type { LifestyleTipDetail } from "../types/lifestyle";
  * `article_likes` / `article_comments` to the backend, this is the file to
  * extend.
  */
+
+/* Renders the rich-text body produced by the admin editor.
+ *
+ * The HTML is already sanitised server-side on save (strict allowlist, no
+ * scripts / event handlers / javascript: URLs). We sanitise again here as
+ * defence in depth: this is a public page, and re-sanitising on render means
+ * even a row written directly to the database — bypassing the API — can't
+ * inject anything into a visitor's browser.
+ *
+ * Articles created before the rich-text editor have no content_html and fall
+ * back to the plain-text renderer below, so nothing that already exists breaks.
+ */
+function ArticleHtml({ html }: { html: string }) {
+  const clean = React.useMemo(
+    () => DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'blockquote',
+        'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'code', 'pre', 'hr', 'span',
+      ],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'style'],
+    }),
+    [html]
+  );
+  return <div className="uf-article" dangerouslySetInnerHTML={{ __html: clean }} />;
+}
 
 /* Minimal markdown-ish renderer. The content column on `lifestyle_articles`
  * is plain text — most posts will be paragraphs, with the occasional ##/###
@@ -187,7 +213,11 @@ export default function ArticleDetailPage() {
 
       {/* Body */}
       <article className="max-w-3xl mx-auto px-5 sm:px-8 py-12">
-        <div className="prose">{renderContent(article.content)}</div>
+        <div className="prose">
+          {article.content_html
+            ? <ArticleHtml html={article.content_html} />
+            : renderContent(article.content)}
+        </div>
 
         <div className="mt-12 pt-8 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Link

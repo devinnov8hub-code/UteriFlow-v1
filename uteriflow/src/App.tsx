@@ -1,5 +1,5 @@
 import "./App.css";
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 
 // Landing shell
@@ -23,7 +23,11 @@ import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
 
 // Admin sub-app — owns /admin/*
-import AdminApp from "./admin/AdminApp";
+// Lazy-loaded on purpose. The admin bundle carries the rich-text editor and
+// charting libraries, none of which a landing-page visitor needs. Splitting it
+// out keeps the public site light; the chunk is fetched only when someone
+// actually navigates to /admin.
+const AdminApp = lazy(() => import("./admin/AdminApp"));
 
 /**
  * UteriFlow web app
@@ -114,7 +118,22 @@ function App() {
     <BrowserRouter>
       <ScrollManager />
       <Routes>
-        <Route path="/admin/*" element={<AdminApp />} />
+        <Route
+          path="/admin/*"
+          element={
+            <Suspense fallback={
+              <div style={{
+                minHeight: '100vh', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', color: '#690064', fontSize: '14px',
+                fontFamily: 'system-ui, sans-serif',
+              }}>
+                Loading…
+              </div>
+            }>
+              <AdminApp />
+            </Suspense>
+          }
+        />
         <Route path="/*" element={<LandingShell />} />
       </Routes>
     </BrowserRouter>

@@ -48,13 +48,45 @@ async function enrichPosts(db, posts, userId) {
   for (const b of (bookmarks.data  ?? [])) bookmarkSet.add(b.post_id);
   for (const c of (commentRows.data ?? [])) commentMap[c.post_id] = (commentMap[c.post_id] || 0) + 1;
 
-  return posts.map(p => ({
-    ...p,
-    author:        (!p.is_anonymous && p.author_id) ? (profileMap[p.author_id] ?? null) : null,
-    is_liked:      likedSet.has(p.id),
-    is_bookmarked: bookmarkSet.has(p.id),
-    comment_count: commentMap[p.id] ?? 0,
-  }));
+  return posts.map(p => {
+    const author = (!p.is_anonymous && p.author_id) ? (profileMap[p.author_id] ?? null) : null;
+    const count  = commentMap[p.id] ?? 0;
+    return {
+      ...p,
+      author,
+      // Bug-spec §"Community Avatar Displays Incorrect Initial".
+      // The avatar must NEVER be derived from post content. This block gives
+      // the client a ready-made, safe display identity so there is nothing
+      // left to infer: use `avatarUrl` if set, otherwise render `initial`.
+      // For anonymous posts every identifying field is deliberately withheld.
+      authorDisplay: buildAuthorDisplay(author, p.is_anonymous),
+      is_liked:      likedSet.has(p.id),
+      is_bookmarked: bookmarkSet.has(p.id),
+      comment_count: count,
+      // Alias — some clients read `comments_count`. Both are always returned
+      // and always identical, so a naming mismatch can never show a wrong count.
+      comments_count: count,
+    };
+  });
+}
+
+// ─── Safe avatar/identity shape ───────────────────────────────────
+// Priority (per spec):
+//   1. uploaded profile image
+//   2. first letter of the user's name
+//   3. anonymous avatar — no image, no initial, no name
+// Post content is never consulted.
+function buildAuthorDisplay(author, isAnonymous) {
+  if (isAnonymous) {
+    return { name: 'Anonymous', initial: '?', avatarUrl: null, isAnonymous: true };
+  }
+  const name = (author?.display_name || '').trim();
+  return {
+    name:        name || 'UteriFlow member',
+    initial:     (name ? name[0] : 'U').toUpperCase(),
+    avatarUrl:   author?.avatar_url ?? null,
+    isAnonymous: false,
+  };
 }
 
 async function enrichComments(db, comments) {
@@ -70,10 +102,20 @@ async function enrichComments(db, comments) {
   const profileMap = {};
   for (const p of (profiles ?? [])) profileMap[p.id] = p;
 
-  return comments.map(c => ({
-    ...c,
-    author: c.author_id ? (profileMap[c.author_id] ?? null) : null,
-  }));
+  // Bug-spec §"Anonymous posts do not protect comments".
+  // Previously the author profile was attached unconditionally, so a user who
+  // commented anonymously still had their real name and picture returned by
+  // the API — the identity leak happened server-side, before the app ever
+  // rendered anything. Anonymous comments now return no author at all.
+  return comments.map(c => {
+    const anon   = c.is_anonymous === true;
+    const author = (!anon && c.author_id) ? (profileMap[c.author_id] ?? null) : null;
+    return {
+      ...c,
+      author,
+      authorDisplay: buildAuthorDisplay(author, anon),
+    };
+  });
 }
 
 // ─── List posts ───────────────────────────────────────────────
@@ -261,12 +303,21 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
     const limit  = Number(req.query.limit  ?? 30);
     const offset = Number(req.query.offset ?? 0);
 
-    // First, get the total count of top-level comments for this post.
-    const { count: total, error: countError } = await req.supabase
-      .from('comments')
-      .select('*', { count: 'exact', head: true })
-      .eq('post_id', req.params.id)
-      .is('parent_id', null);
+    // Two different counts, for two different jobs:
+    //   total    → TOP-LEVEL comments only. Drives pagination of this list.
+    //   totalAll → EVERY comment including replies. This is what a post's
+    //              comment badge should show.
+    // Conflating them was why the badge appeared stuck: a post with one
+    // top-level comment and many replies still displayed "1".
+    const [{ count: total, error: countError }, { count: totalAll }] = await Promise.all([
+      req.supabase.from('comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', req.params.id)
+        .is('parent_id', null),
+      req.supabase.from('comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('post_id', req.params.id),
+    ]);
     if (countError) throw countError;
 
     // If offset is past the end, return an empty page instead of letting
@@ -274,7 +325,7 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
     if (total !== null && offset >= total) {
       return success(res, {
         comments: [],
-        pagination: { total: total ?? 0, limit, offset, returned: 0 },
+        pagination: { total: total ?? 0, totalAll: totalAll ?? 0, limit, offset, returned: 0 },
       });
     }
 
@@ -290,7 +341,7 @@ router.get('/posts/:id/comments', [...uuidParam, ...pagination], validate, async
     const comments = await enrichComments(req.supabase, rawComments ?? []);
     return success(res, {
       comments,
-      pagination: { total: total ?? 0, limit, offset, returned: comments.length },
+      pagination: { total: total ?? 0, totalAll: totalAll ?? 0, limit, offset, returned: comments.length },
     });
   } catch (error) { next(error); }
 });
@@ -337,6 +388,7 @@ router.post('/posts/:id/comments', [...uuidParam, ...createComment], validate, a
   try {
     const { content, parentId } = req.body;
     const userId = req.user.id;
+    const isAnonymous = req.body.isAnonymous ?? req.body.is_anonymous ?? false;
 
     const { data: post } = await req.supabase
       .from('posts').select('id').eq('id', req.params.id).maybeSingle();
@@ -344,7 +396,13 @@ router.post('/posts/:id/comments', [...uuidParam, ...createComment], validate, a
 
     const { data: comment, error } = await req.supabase
       .from('comments')
-      .insert({ post_id: req.params.id, author_id: userId, content, parent_id: parentId ?? null })
+      .insert({
+        post_id:      req.params.id,
+        author_id:    userId,      // still stored, so the user can manage/delete their own comment
+        content,
+        parent_id:    parentId ?? null,
+        is_anonymous: isAnonymous, // but never exposed by the API when true
+      })
       .select()
       .single();
     if (error) throw error;

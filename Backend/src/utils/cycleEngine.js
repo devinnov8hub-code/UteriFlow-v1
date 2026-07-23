@@ -94,16 +94,27 @@ export function onboardingIsPredictive({ periodRegularity, cycleLengthRange } = 
 // ─── Cycle statistics from period_logs[] ───────────────────────────
 // Expects logs sorted ASC by start_date. Returns null fields when there
 // isn't enough data (rather than fabricating a 28-day cycle).
+// Bug-spec §12 ("Cycle Length Should Not Be Limited By Onboarding Range"):
+// a user-recorded cycle must never be rejected or reduced because it falls
+// outside an expected range. The band below is a TYPO guard only, not a
+// clinical cap — it exists so a mistyped year (e.g. 2025 instead of 2026)
+// can't poison the average. It was previously 14-90, which silently DISCARDED
+// genuinely long cycles — exactly the PCOS / irregular users the spec cares
+// about. Widened to 120 days, and anything excluded is now reported via
+// `outliersIgnored` instead of vanishing without trace.
+export const CYCLE_MIN_DAYS = 14;
+export const CYCLE_MAX_DAYS = 120;
+
 export function cycleStats(periodLogs = []) {
   const cycleLengths = [];
+  let outliersIgnored = 0;
 
   for (let i = 1; i < periodLogs.length; i++) {
     const prev = new Date(periodLogs[i - 1].start_date);
     const curr = new Date(periodLogs[i].start_date);
     const len = Math.round((curr - prev) / 86400000);
-    // Sanity: 14-90 days is a defensible biological band; anything outside is
-    // almost certainly a typo or a missed log and would distort the stats.
-    if (len >= 14 && len <= 90) cycleLengths.push(len);
+    if (len >= CYCLE_MIN_DAYS && len <= CYCLE_MAX_DAYS) cycleLengths.push(len);
+    else if (Number.isFinite(len) && len > 0)           outliersIgnored += 1;
   }
 
   if (cycleLengths.length === 0) {
@@ -114,6 +125,7 @@ export function cycleStats(periodLogs = []) {
       minCycle:       null,
       maxCycle:       null,
       cyclesUsed:     0,
+      outliersIgnored,
     };
   }
 
@@ -133,23 +145,106 @@ export function cycleStats(periodLogs = []) {
     minCycle:       Math.min(...recent),
     maxCycle:       Math.max(...recent),
     cyclesUsed:     recent.length,
+    outliersIgnored,
   };
 }
 
 
+// ─── Period (bleed) duration ───────────────────────────────────────
+// Inclusive day count: 1 July → 6 July is 6 days, NOT 5.
+// Bug-spec §2: the onboarding estimate is an ESTIMATE. A real logged period
+// is never truncated to fit it. The 1-20 band below is a typo guard only.
+export const BLEED_MIN_DAYS = 1;
+export const BLEED_MAX_DAYS = 20;
+
+export function periodDuration(log) {
+  if (!log?.start_date || !log?.end_date) return null;
+  const start = new Date(log.start_date);
+  const end   = new Date(log.end_date);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const days = Math.round((end - start) / 86400000) + 1; // inclusive
+  return days >= 1 ? days : null;
+}
+
+
 // ─── Average bleed length from logs that have an end_date ──────────
+// Bug-spec §4: Average Period Length = total logged days / number of logged
+// periods — computed from ACTUAL history, never from the onboarding range.
+// Previously capped contributing periods at 14 days; widened to 20 so a long
+// real period still counts instead of being silently dropped.
 export function avgBleedLength(periodLogs = []) {
   const lengths = [];
   for (const log of periodLogs) {
-    if (!log.start_date || !log.end_date) continue;
-    const start = new Date(log.start_date);
-    const end   = new Date(log.end_date);
-    const days  = Math.round((end - start) / 86400000) + 1; // inclusive
-    if (days >= 1 && days <= 14) lengths.push(days);
+    const days = periodDuration(log);
+    if (days !== null && days >= BLEED_MIN_DAYS && days <= BLEED_MAX_DAYS) lengths.push(days);
   }
   if (lengths.length === 0) return null;
   const sum = lengths.reduce((a, b) => a + b, 0);
   return Math.round(sum / lengths.length);
+}
+
+
+// ─── Period history (bug-spec §3) ──────────────────────────────────
+// Every logged period, individually, with its real duration. This is the
+// record set all future calculations are derived from.
+// Returns newest-first; `duration` is null while a period is still ongoing
+// (no end_date yet) so the client can distinguish "5 days" from "still going".
+export function buildPeriodHistory(periodLogs = []) {
+  return [...periodLogs]
+    .filter(l => l?.start_date)
+    .sort((a, b) => (a.start_date < b.start_date ? 1 : -1))
+    .map(l => ({
+      id:        l.id ?? null,
+      startDate: l.start_date,
+      endDate:   l.end_date ?? null,
+      duration:  periodDuration(l),
+      isOngoing: !l.end_date,
+    }));
+}
+
+
+// ─── Measured averages, resolved by the spec's priority rules ──────
+// Bug-spec §6 — Data Priority Rules:
+//   1. user edited / logged period dates
+//   2. historical period records
+//   3. onboarding estimates       ← lowest priority, never a cap
+// Returns both the resolved value AND its source, so clients (and support)
+// can always see WHY a number is what it is.
+export function resolveAverages(periodLogs = [], profile = {}) {
+  const stats         = cycleStats(periodLogs);
+  const measuredBleed = avgBleedLength(periodLogs);
+
+  const cycleLength = stats.avgCycleLength ?? profile.cycle_length_avg ?? null;
+  const bleedLength = measuredBleed        ?? profile.period_length_avg ?? null;
+
+  // Exact (unrounded) averages. Date arithmetic needs whole days, but the
+  // spec's §6 example displays "6.5 days" — so both are provided: the rounded
+  // value drives predictions, the exact value is what the UI should show.
+  const bleedDays = [];
+  for (const log of periodLogs) {
+    const d = periodDuration(log);
+    if (d !== null && d >= BLEED_MIN_DAYS && d <= BLEED_MAX_DAYS) bleedDays.push(d);
+  }
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const bleedLengthExact = bleedDays.length
+    ? round1(bleedDays.reduce((a, b) => a + b, 0) / bleedDays.length)
+    : (profile.period_length_avg ?? null);
+  const cycleLengthExact = stats.cycleLengths.length
+    ? round1(stats.cycleLengths.reduce((a, b) => a + b, 0) / stats.cycleLengths.length)
+    : (profile.cycle_length_avg ?? null);
+
+  return {
+    bleedLengthExact,
+    cycleLengthExact,
+    cycleLength,
+    cycleLengthSource: stats.avgCycleLength != null ? 'measured'
+                     : profile.cycle_length_avg != null ? 'onboarding' : 'unknown',
+    bleedLength,
+    bleedLengthSource: measuredBleed != null ? 'measured'
+                     : profile.period_length_avg != null ? 'onboarding' : 'unknown',
+    cyclesUsed:   stats.cyclesUsed,
+    periodsLogged: periodLogs.filter(l => l?.end_date).length,
+  };
 }
 
 

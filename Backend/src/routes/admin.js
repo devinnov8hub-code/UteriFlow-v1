@@ -7,6 +7,7 @@ import { AppError, NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 import { rangeOrEmpty } from '../utils/pagination.js';
 import { sendPushToUsers } from '../utils/push.js';
+import { normalizeArticleContent } from '../utils/richText.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -444,6 +445,9 @@ const articleBodyValidators = [
   body('title').trim().notEmpty().withMessage('Title is required').isLength({ max: 200 }),
   body('summary').optional({ nullable: true }).trim().isLength({ max: 500 }),
   body('content').optional({ nullable: true }).isString(),
+  // Rich-text HTML from the admin WYSIWYG editor. Sanitised server-side before storage.
+  body('contentHtml').optional({ nullable: true }).isString().isLength({ max: 200000 })
+    .withMessage('Article content is too long'),
   body('category').optional().isIn(LIFESTYLE_CATEGORIES)
     .withMessage(`Category must be one of: ${LIFESTYLE_CATEGORIES.join(', ')}`),
   body('readTime').optional({ nullable: true }).isInt({ min: 1, max: 60 }).toInt(),
@@ -456,6 +460,9 @@ const articleUpdateValidators = [
   body('title').optional().trim().notEmpty().withMessage('Title cannot be empty').isLength({ max: 200 }),
   body('summary').optional({ nullable: true }).trim().isLength({ max: 500 }),
   body('content').optional({ nullable: true }).isString(),
+  // Rich-text HTML from the admin WYSIWYG editor. Sanitised server-side before storage.
+  body('contentHtml').optional({ nullable: true }).isString().isLength({ max: 200000 })
+    .withMessage('Article content is too long'),
   body('category').optional().isIn(LIFESTYLE_CATEGORIES)
     .withMessage(`Category must be one of: ${LIFESTYLE_CATEGORIES.join(', ')}`),
   body('readTime').optional({ nullable: true }).isInt({ min: 1, max: 60 }).toInt(),
@@ -468,11 +475,25 @@ function articleColumnsFromBody(b) {
   const cols = {};
   if (b.title       !== undefined) cols.title        = b.title;
   if (b.summary     !== undefined) cols.summary      = b.summary;
-  if (b.content     !== undefined) cols.content      = b.content;
   if (b.category    !== undefined) cols.category     = b.category;
   if (b.readTime    !== undefined) cols.read_time    = b.readTime;
   if (b.imageUrl    !== undefined) cols.image_url    = b.imageUrl;
   if (b.isPublished !== undefined) cols.is_published = b.isPublished;
+
+  // ── Rich text (bug-spec "Article Management Editor Does Not Support Rich
+  //    Text Formatting") ────────────────────────────────────────────────────
+  // The admin editor sends `contentHtml`. We sanitise it server-side and store
+  // BOTH the formatted HTML and a plain-text rendering, so:
+  //   • the landing page and updated app builds render the formatting, and
+  //   • any client still reading the old `content` column keeps working.
+  if (b.contentHtml !== undefined || b.content !== undefined) {
+    const { content, content_html } = normalizeArticleContent({
+      content:     b.content,
+      contentHtml: b.contentHtml,
+    });
+    cols.content      = content;
+    cols.content_html = content_html;
+  }
   return cols;
 }
 

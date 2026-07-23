@@ -4,13 +4,30 @@ import { formatDistanceToNow } from 'date-fns'
 import toast from 'react-hot-toast'
 import api from '../api'
 import { PageHeader, Card, Spinner, Empty, ConfirmModal, Badge, Btn } from '../components/UI'
+import RichTextEditor from '../components/RichTextEditor'
 
 const PAGE = 50
 const CATEGORIES = ['Daily Habits', 'Stress Management', 'Cycle Care']
 
 const emptyDraft = {
-  title: '', summary: '', content: '',
+  title: '', summary: '', content: '', contentHtml: '',
   category: 'Daily Habits', readTime: 4, imageUrl: '', isPublished: true,
+}
+
+/* Articles written before the rich-text editor existed are stored as plain
+   text. Wrap them in paragraphs so they open in the editor as real content
+   rather than one unbroken block — nothing is lost, and re-saving simply
+   upgrades them to formatted HTML. */
+function plainTextToHtml(text) {
+  if (!text || typeof text !== 'string') return ''
+  const escape = s => s
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return text
+    .split(/\n{2,}/)
+    .map(block => block.trim())
+    .filter(Boolean)
+    .map(block => `<p>${escape(block).replace(/\n/g, '<br>')}</p>`)
+    .join('')
 }
 
 export default function ArticlesPage() {
@@ -63,6 +80,9 @@ export default function ArticlesPage() {
         title: a.title ?? '',
         summary: a.summary ?? '',
         content: a.content ?? '',
+        // Prefer the formatted body; fall back to converting the legacy
+        // plain-text column so old articles stay editable.
+        contentHtml: a.content_html || plainTextToHtml(a.content ?? ''),
         category: a.category ?? 'Daily Habits',
         readTime: a.read_time ?? 4,
         imageUrl: a.image_url ?? '',
@@ -80,7 +100,11 @@ export default function ArticlesPage() {
       const payload = {
         title: editor.title.trim(),
         summary: editor.summary?.trim() || null,
+        // The editor is the source of truth. `content` is still sent so the
+        // request stays valid for any older backend, but the server derives
+        // the authoritative plain-text copy from the sanitised HTML.
         content: editor.content ?? '',
+        contentHtml: editor.contentHtml ?? '',
         category: editor.category,
         readTime: Number(editor.readTime) || 4,
         imageUrl: editor.imageUrl?.trim() || null,
@@ -300,12 +324,10 @@ function EditorModal({ draft, setDraft, onClose, onSave, saving }) {
           </Field>
 
           <Field label="Content">
-            <textarea
-              value={draft.content}
-              onChange={e => set('content', e.target.value)}
-              placeholder="Write the full article here. Blank lines separate paragraphs."
-              rows={10}
-              style={{ ...inp, resize:'vertical', lineHeight:1.6, minHeight:'160px' }}
+            <RichTextEditor
+              value={draft.contentHtml}
+              onChange={v => set('contentHtml', v)}
+              placeholder="Write the full article here. Use the toolbar to add headings, emphasis and lists."
             />
           </Field>
 

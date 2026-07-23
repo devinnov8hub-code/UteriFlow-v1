@@ -11,6 +11,7 @@ import {
   inferPhaseFromSymptoms, evaluatePcosFlags, computePcosTier,
   confidenceLevel, calculateCycleDay, isHormonalContraceptive,
   evaluateLatePeriodPathway, onboardingIsPredictive, mapHormonalToPcos,
+  periodDuration, buildPeriodHistory, resolveAverages,
 } from '../utils/cycleEngine.js';
 import { selectDailyInsight } from '../utils/insightEngine.js';
 
@@ -47,6 +48,11 @@ async function loadUserContext(db, userId, today = new Date()) {
 
   const stats = cycleStats(periodLogs);
   const bleed = avgBleedLength(periodLogs) ?? profile.period_length_avg ?? null;
+
+  // Bug-spec §3/§4/§6 — every logged period, and averages derived from that
+  // real history with the onboarding estimate as the LAST resort only.
+  const periodHistory = buildPeriodHistory(periodLogs);
+  const averages      = resolveAverages(periodLogs, profile);
 
   // Is this user's onboarding profile predictable? Users who answered
   // "varies by more than a week" / "totally unpredictable" (regularity) or
@@ -181,6 +187,8 @@ async function loadUserContext(db, userId, today = new Date()) {
     lastPeriodStart,
     daysSinceLastPeriod,
     stats: { ...stats, avgCycleLength: effectiveCycleLength, avgBleedLength: bleed },
+    periodHistory,
+    averages,
     phase: currentPhase,
     phaseDetails: phaseResult.details ?? null,
     phaseSource,
@@ -275,9 +283,11 @@ async function refreshPredictions(db, userId) {
 
   // Prefer the measured average from logs over the onboarding estimate.
   // This is the PRD's "Cycle Length Formula" — average of last 3-6 cycles.
+  // NOTE: end_date is selected too — it is required to measure the user's real
+  // bleed length (see the periodLengthAvg fix further down).
   const { data: allLogs } = await db
     .from('period_logs')
-    .select('start_date')
+    .select('start_date, end_date')
     .eq('user_id', userId)
     .order('start_date', { ascending: true });
 
@@ -318,7 +328,19 @@ async function refreshPredictions(db, userId) {
 
   const cycleLengthAvg = measuredStats.avgCycleLength
     ?? (onboardingPredictive ? (profile?.cycle_length_avg ?? null) : null);
-  const periodLengthAvg = profile?.period_length_avg ?? null;
+
+  // ── BUG 1 FIX (bug-spec §2) ──────────────────────────────────────
+  // This previously read `profile.period_length_avg` — the ONBOARDING
+  // estimate, stored once as a range midpoint ("3-5 days" → 4) and never
+  // updated again. So a user whose real period runs 6 days kept getting a
+  // 4-day predicted bleed forever, and the 6th day was never shown.
+  //
+  // The measured average from the user's own logged periods now takes
+  // priority, exactly as §6 requires (logged data > history > onboarding).
+  // The onboarding value survives only as a fallback for users who have not
+  // yet completed a period with an end date.
+  const measuredBleedLength = avgBleedLength(allLogs || []);
+  const periodLengthAvg = measuredBleedLength ?? profile?.period_length_avg ?? null;
 
   // PRD Rule 1: never assume 28 days. With no measured average and no usable
   // onboarding baseline, do NOT generate a prediction.
@@ -431,7 +453,209 @@ router.get('/logs', periodValidators.pagination, validate, async (req, res, next
       req.supabase.from('period_logs').select('id', { count: 'exact', head: true }).eq('user_id', userId)
     );
 
-    return success(res, { periodLogs: data, total: count, limit, offset });
+    // Bug-spec §3: expose the real, inclusive duration of every logged period.
+    // Purely additive — every pre-existing field is untouched, so older app
+    // builds keep working unchanged.
+    const withDuration = (data ?? []).map(l => ({
+      ...l,
+      duration:  periodDuration(l),
+      isOngoing: !l.end_date,
+    }));
+
+    return success(res, { periodLogs: withDuration, total: count, limit, offset });
+  } catch (error) { next(error); }
+});
+
+
+// GET /period/history
+//
+// Bug-spec §3 + §4. The canonical period-history record set, plus the averages
+// derived from it. This is the endpoint the app should use for "your cycles"
+// and for anything that needs to know the user's REAL averages.
+//
+// Data priority (§6): logged periods > history > onboarding estimate.
+// `*Source` fields make it explicit which one produced each number, so a
+// support engineer can always explain a value to a user.
+router.get('/history', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const { data: logs, error } = await req.supabase
+      .from('period_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('start_date', { ascending: true });
+    if (error) throw error;
+
+    const { data: profile } = await req.supabase
+      .from('user_profiles')
+      .select('cycle_length_avg, period_length_avg, cycle_length_range, period_length_range')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const history  = buildPeriodHistory(logs ?? []);
+    const averages = resolveAverages(logs ?? [], profile ?? {});
+    const stats    = cycleStats(logs ?? []);
+
+    return success(res, {
+      periodHistory: history,
+      averages: {
+        // §4: Average Period Length = total logged days / number of periods
+        averagePeriodLength:      averages.bleedLength,        // whole days (drives predictions)
+        averagePeriodLengthExact: averages.bleedLengthExact,   // e.g. 6.5 (for display)
+        averagePeriodSource:      averages.bleedLengthSource,
+        averageCycleLength:       averages.cycleLength,
+        averageCycleLengthExact:  averages.cycleLengthExact,
+        averageCycleSource:       averages.cycleLengthSource,
+        periodsLogged:        averages.periodsLogged,
+        cyclesUsed:           averages.cyclesUsed,
+      },
+      variation: {
+        stdDev:          stats.stdDev,
+        minCycle:        stats.minCycle,
+        maxCycle:        stats.maxCycle,
+        // Cycles excluded from the average as probable typos (see CYCLE_MAX_DAYS).
+        outliersIgnored: stats.outliersIgnored ?? 0,
+      },
+      onboardingEstimate: {
+        cycleLengthRange:  profile?.cycle_length_range  ?? null,
+        periodLengthRange: profile?.period_length_range ?? null,
+        note: 'Onboarding values are an initial estimate only and never limit recorded data.',
+      },
+    });
+  } catch (error) { next(error); }
+});
+
+
+// ─── Calendar day-state helpers ───────────────────────────────────
+// All date maths is done on plain YYYY-MM-DD strings in UTC so a user in
+// WAT/GMT+1 never sees a marker land on the wrong day.
+const isoDay = (d) => new Date(d).toISOString().split('T')[0];
+const addDays = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().split('T')[0];
+};
+const eachDay = (startIso, endIso) => {
+  const out = [];
+  if (!startIso || !endIso || startIso > endIso) return out;
+  let cur = startIso;
+  // Hard stop at ~2 years of days; protects against a malformed range.
+  for (let i = 0; cur <= endIso && i < 800; i++) {
+    out.push(cur);
+    cur = addDays(cur, 1);
+  }
+  return out;
+};
+
+// GET /period/calendar?start=YYYY-MM-DD&end=YYYY-MM-DD
+//
+// Bug-spec §7, §8, §9 — "Period Editing Does Not Update Calendar Correctly".
+//
+// The root problem was that the app received actual logs and predictions as
+// two SEPARATE datasets and had to merge them on-device. That merge is where
+// the wrong/faded/missing red circles came from: a stale predicted range could
+// still paint over days the user had actually logged.
+//
+// This endpoint removes the ambiguity entirely. The server resolves every day
+// to exactly ONE state, applying the spec's priority order:
+//
+//     1. actual  — user-entered period date        → solid red
+//     2. ovulation                                  → green
+//     3. predicted — prediction engine only         → dotted outline
+//
+// A predicted day that collides with an actual logged day is dropped, never
+// the other way round ("predictions must never overwrite actual logged
+// periods"). Because predictions are re-derived on every period edit, the
+// calendar is always consistent with what the user last saved.
+router.get('/calendar', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // Default window: previous month through next two months — enough for a
+    // calendar screen to scroll without another round trip.
+    const today    = isoDay(new Date());
+    const startIso = (req.query.start && /^\d{4}-\d{2}-\d{2}$/.test(req.query.start))
+      ? req.query.start : addDays(today, -45);
+    const endIso   = (req.query.end && /^\d{4}-\d{2}-\d{2}$/.test(req.query.end))
+      ? req.query.end   : addDays(today, 75);
+
+    if (startIso > endIso) throw new AppError('start must be before end', 400, 'INVALID_RANGE');
+
+    const [{ data: logs }, { data: prediction }, { data: profile }] = await Promise.all([
+      req.supabase.from('period_logs').select('*').eq('user_id', userId)
+        .order('start_date', { ascending: true }),
+      req.supabase.from('cycle_predictions').select('*')
+        .eq('user_id', userId).eq('is_current', true)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      req.supabase.from('user_profiles').select('contraceptive_type, period_length_avg').eq('id', userId).maybeSingle(),
+    ]);
+
+    const days = {};
+    const mark = (iso, state, meta = {}) => {
+      if (iso < startIso || iso > endIso) return;
+      const rank = { actual: 3, ovulation: 2, fertile: 1, predicted: 1 };
+      const existing = days[iso];
+      // Higher-priority state wins; equal priority keeps the first one.
+      if (!existing || rank[state] > rank[existing.state]) {
+        days[iso] = { date: iso, state, ...meta };
+      }
+    };
+
+    // ── 1. ACTUAL logged periods — highest priority, always solid red ──
+    const actualDays = new Set();
+    for (const log of (logs ?? [])) {
+      if (!log.start_date) continue;
+      // An ongoing period (no end_date) marks only its start day until the
+      // user closes it out — we must not invent days they haven't lived yet.
+      const last = log.end_date ?? log.start_date;
+      for (const d of eachDay(log.start_date, last)) {
+        actualDays.add(d);
+        mark(d, 'actual', { logId: log.id, isOngoing: !log.end_date });
+      }
+    }
+
+    // Hormonal contraceptive users get no ovulation/fertile/predicted markers.
+    const suppressed = isHormonalContraceptive(profile?.contraceptive_type);
+
+    // ── 2. OVULATION + fertile window ──
+    if (!suppressed && prediction?.ovulation_date) {
+      for (const d of eachDay(prediction.fertile_window_start, prediction.fertile_window_end)) {
+        if (!actualDays.has(d)) mark(d, 'fertile');
+      }
+      if (!actualDays.has(prediction.ovulation_date)) {
+        mark(prediction.ovulation_date, 'ovulation');
+      }
+    }
+
+    // ── 3. PREDICTED period — lowest priority, never over an actual day ──
+    if (!suppressed && prediction?.predicted_start) {
+      const predEnd = prediction.predicted_end ?? prediction.predicted_start;
+      for (const d of eachDay(prediction.predicted_start, predEnd)) {
+        if (!actualDays.has(d)) mark(d, 'predicted');
+      }
+    }
+
+    const dayList = Object.values(days).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    return success(res, {
+      range: { start: startIso, end: endIso },
+      // One resolved state per day. Render directly — no client-side merging.
+      //   actual    → solid red      (confirmed, user-entered)
+      //   ovulation → green
+      //   fertile   → light green
+      //   predicted → dotted outline (estimate only)
+      days: dayList,
+      legend: {
+        actual:    'Confirmed period date entered by the user. Display as a solid indicator.',
+        ovulation: 'Estimated ovulation day. Display as a green indicator.',
+        fertile:   'Estimated fertile window. Display as a lighter green indicator.',
+        predicted: 'Predicted period. Display as a dotted outline — never as a confirmed date.',
+      },
+      prediction: suppressed ? null : (prediction ?? null),
+      predictionsSuppressed: suppressed,
+      suppressedReason: suppressed ? 'hormonal_contraceptive' : null,
+    });
   } catch (error) { next(error); }
 });
 
@@ -916,7 +1140,23 @@ router.get('/insights', async (req, res, next) => {
       const curr = new Date(logs[i].start_date);
       const length = Math.round((curr - prev) / 86400000);
       if (length > 0 && length < 120) { // sanity check
-        cycleHistory.push({ label: `Cycle ${i}`, days: length, startDate: logs[i-1].start_date });
+        // `endDate` is the period's REAL logged end, not a value derived from
+        // an average. The calendar needs it to shade the exact days the user
+        // recorded — deriving the end from an average period length is what
+        // produced indicators on days the user never selected (and missed the
+        // ones they did).
+        const startLog = logs[i - 1];
+        const endDate  = startLog.end_date ?? null;
+        const duration = endDate
+          ? Math.round((new Date(endDate) - new Date(startLog.start_date)) / 86400000) + 1
+          : null;
+        cycleHistory.push({
+          label: `Cycle ${i}`,
+          days: length,
+          startDate: startLog.start_date,
+          endDate,
+          duration,
+        });
         if (length > longestCycle)  longestCycle  = length;
         if (length < shortestCycle) shortestCycle = length;
         totalLength += length;
