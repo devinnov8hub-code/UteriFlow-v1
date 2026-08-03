@@ -455,9 +455,61 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
       throw new ValidationError('That period is unusually long. Please check the dates.');
     }
 
-    // ── 1. Explicit edit by id ──────────────────────────────────────────────
+    // ── Resolve which period this save is editing ───────────────────────────
+    //
+    // IMPORTANT: the mobile edit screen always sends the LAST period's id as
+    // `logId`, no matter which period the user is actually editing on the
+    // calendar. So `logId` alone cannot be trusted to identify the target —
+    // relying on it made editing any PREVIOUS period silently edit the most
+    // recent one instead.
+    //
+    // Resolution order that actually matches user intent:
+    //   1. If the picked/edited dates fall on an EXISTING period, edit THAT
+    //      period. The date the user tapped is the strongest signal of intent.
+    //   2. Otherwise, if a valid `logId` was supplied, edit that record
+    //      (covers moving a period's start well away from its old dates).
+    //   3. Otherwise insert a new period.
     let target = null;
-    if (logId) {
+
+    const inStart = startDate;
+    const inEnd   = endDate ?? startDate;
+
+    // Pull nearby periods once and match in JS so the rule stays readable.
+    const windowStart = addDays(startDate, -45);
+    const windowEnd   = addDays(endDate ?? startDate, 45);
+    const { data: nearby, error: nearbyError } = await req.supabase
+      .from('period_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('start_date', windowStart)
+      .lte('start_date', windowEnd)
+      .order('start_date', { ascending: false });
+    if (nearbyError) throw nearbyError;
+
+    // 1. Match by date — the period the user is visibly editing.
+    for (const log of (nearby ?? [])) {
+      const exStart = toDayString(log.start_date);
+      const exEnd   = toDayString(log.end_date) ?? exStart;
+      if (!exStart) continue;
+
+      // Same period if the ranges genuinely OVERLAP, or the start dates are
+      // within a few days (the user nudging this period's start or end).
+      //
+      // Deliberately NOT end-to-start adjacency: a real period beginning the
+      // day after another ended is a SEPARATE period; treating it as an edit
+      // would swallow a genuine cycle (real data had periods logged 1 day apart).
+      const overlaps     = exStart <= inEnd && exEnd >= inStart;
+      const sameishStart = Math.abs(dayDiff(exStart, inStart)) <= 3;
+
+      if (overlaps || sameishStart) { target = log; break; }
+    }
+
+    // 2. No date match — fall back to the explicit id ONLY when the incoming
+    //    dates are near that period (i.e. the user genuinely moved this period,
+    //    just far enough that the date match missed). If the dates are nowhere
+    //    near the id's period, the client sent a stale id for what is actually
+    //    a NEW period, so we ignore the id and insert below.
+    if (!target && logId) {
       const { data, error } = await req.supabase
         .from('period_logs')
         .select('*')
@@ -465,47 +517,14 @@ router.post('/log', periodValidators.logCreate, validate, async (req, res, next)
         .eq('user_id', userId)
         .maybeSingle();
       if (error) throw error;
-      if (!data) throw new NotFoundError('Period log not found');
-      target = data;
-    }
-
-    // ── 2. Otherwise find the period this save refers to ────────────────────
-    // Look at a window around the incoming dates rather than the whole history,
-    // then pick the best match in JS so the rule stays readable.
-    if (!target) {
-      const windowStart = addDays(startDate, -60);
-      const windowEnd   = addDays(endDate ?? startDate, 60);
-
-      const { data: nearby, error } = await req.supabase
-        .from('period_logs')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('start_date', windowStart)
-        .lte('start_date', windowEnd)
-        .order('start_date', { ascending: false });
-      if (error) throw error;
-
-      const inStart = startDate;
-      const inEnd   = endDate ?? startDate;
-
-      for (const log of (nearby ?? [])) {
-        const exStart = toDayString(log.start_date);
-        const exEnd   = toDayString(log.end_date) ?? exStart;
-        if (!exStart) continue;
-
-        // Same period if the ranges genuinely OVERLAP, or if the start dates
-        // are within a couple of days of each other (the user nudging this
-        // period's start or end).
-        //
-        // Deliberately NOT end-to-start adjacency: a real period beginning the
-        // day after another ended is a SEPARATE period, and treating it as an
-        // edit would silently swallow it. Real data showed periods logged 1 day
-        // apart, so that rule would have merged genuine cycles.
-        const overlaps    = exStart <= inEnd && exEnd >= inStart;
-        const sameishStart = Math.abs(dayDiff(exStart, inStart)) <= 3;
-
-        if (overlaps || sameishStart) { target = log; break; }
+      if (data) {
+        const idStart = toDayString(data.start_date);
+        // "Near" = within ~2 weeks; a move larger than that is a different cycle.
+        if (idStart && Math.abs(dayDiff(idStart, inStart)) <= 14) {
+          target = data;
+        }
       }
+      // Otherwise fall through to insert — a stale id never blocks logging.
     }
 
     let data;

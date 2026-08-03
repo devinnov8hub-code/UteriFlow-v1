@@ -109,6 +109,33 @@ export function cycleStats(periodLogs = []) {
   const cycleLengths = [];
   let outliersIgnored = 0;
 
+  // Collapse duplicate rows before measuring. The old blind-insert behaviour
+  // left many users with several rows sharing (or nearly sharing) a start date.
+  // Walking those directly produces 0-3 day "cycles" that get discarded, which
+  // silently wrecked the cycle average. We keep one entry per distinct cycle by
+  // dropping any start date within 10 days of the previous kept one — real
+  // cycles are always further apart than that.
+  const sorted = [...periodLogs]
+    .filter(l => l?.start_date)
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0));
+  const deduped = [];
+  for (const log of sorted) {
+    const prev = deduped[deduped.length - 1];
+    if (prev) {
+      const gap = Math.round(
+        (new Date(log.start_date) - new Date(prev.start_date)) / 86400000
+      );
+      if (gap < 10) {
+        // Same cycle logged more than once — keep the one with an end date
+        // (more complete), otherwise keep the later row.
+        if (!prev.end_date && log.end_date) deduped[deduped.length - 1] = log;
+        continue;
+      }
+    }
+    deduped.push(log);
+  }
+  periodLogs = deduped;
+
   for (let i = 1; i < periodLogs.length; i++) {
     const prev = new Date(periodLogs[i - 1].start_date);
     const curr = new Date(periodLogs[i].start_date);
@@ -173,8 +200,26 @@ export function periodDuration(log) {
 // Previously capped contributing periods at 14 days; widened to 20 so a long
 // real period still counts instead of being silently dropped.
 export function avgBleedLength(periodLogs = []) {
+  // De-duplicate the same way cycleStats does, so a period logged five times
+  // doesn't count five times toward the average.
+  const sorted = [...periodLogs]
+    .filter(l => l?.start_date)
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0));
+  const deduped = [];
+  for (const log of sorted) {
+    const prev = deduped[deduped.length - 1];
+    if (prev) {
+      const gap = Math.round((new Date(log.start_date) - new Date(prev.start_date)) / 86400000);
+      if (gap < 10) {
+        if (!prev.end_date && log.end_date) deduped[deduped.length - 1] = log;
+        continue;
+      }
+    }
+    deduped.push(log);
+  }
+
   const lengths = [];
-  for (const log of periodLogs) {
+  for (const log of deduped) {
     const days = periodDuration(log);
     if (days !== null && days >= BLEED_MIN_DAYS && days <= BLEED_MAX_DAYS) lengths.push(days);
   }
