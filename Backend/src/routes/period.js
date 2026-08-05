@@ -12,6 +12,7 @@ import {
   confidenceLevel, calculateCycleDay, isHormonalContraceptive,
   evaluateLatePeriodPathway, onboardingIsPredictive, mapHormonalToPcos,
   periodDuration, buildPeriodHistory, resolveAverages,
+  computeEffectiveCycleLength, computeEffectivePeriodLength,
 } from '../utils/cycleEngine.js';
 import { selectDailyInsight } from '../utils/insightEngine.js';
 
@@ -47,7 +48,9 @@ async function loadUserContext(db, userId, today = new Date()) {
   const symptomLogs = symptomsRes.data || [];
 
   const stats = cycleStats(periodLogs);
-  const bleed = avgBleedLength(periodLogs) ?? profile.period_length_avg ?? null;
+  // Effective (gated) bleed length — measured only once 2+ completed periods
+  // exist, else the onboarding estimate. Shared helper so app & backend agree.
+  const bleed = computeEffectivePeriodLength(periodLogs, profile);
 
   // Bug-spec §3/§4/§6 — every logged period, and averages derived from that
   // real history with the onboarding estimate as the LAST resort only.
@@ -64,14 +67,13 @@ async function loadUserContext(db, userId, today = new Date()) {
     cycleLengthRange: profile.cycle_length_range,
   });
 
-  // Measured average comes only from 2+ real logged cycles (null otherwise).
+  // Measured average comes only from real logged cycles (null otherwise).
   const measuredCycleLength = stats.avgCycleLength;
 
-  // Effective cycle length: prefer the measured average (logs). Fall back to the
-  // onboarding estimate ONLY for predictable profiles. For non-predictive users
-  // with no logged cycles this stays NULL → no fabricated phase/prediction.
-  const effectiveCycleLength = measuredCycleLength
-    ?? (onboardingPredictive ? (profile.cycle_length_avg ?? null) : null);
+  // Effective cycle length: measured (only once 2+ cycles exist) else the
+  // onboarding estimate for predictable profiles. Gated + shared with
+  // refreshPredictions so the app and backend never disagree (see helper).
+  const effectiveCycleLength = computeEffectiveCycleLength(stats, profile, onboardingPredictive);
 
   let daysSinceLastPeriod = null;
   let lastPeriodStart = profile.last_period_start;
@@ -326,21 +328,18 @@ async function refreshPredictions(db, userId) {
     cycleLengthRange: profile?.cycle_length_range,
   });
 
-  const cycleLengthAvg = measuredStats.avgCycleLength
-    ?? (onboardingPredictive ? (profile?.cycle_length_avg ?? null) : null);
+  // Use the SAME gated helpers as the summary (loadUserContext), so the stored
+  // prediction is computed from the identical cycle/period length the app
+  // extrapolates with. Measured overrides onboarding only once 2+ cycles exist;
+  // a single back-filled gap can't hijack the cycle length. Mismatch here vs the
+  // summary is exactly what scattered the calendar.
+  const cycleLengthAvg = computeEffectiveCycleLength(measuredStats, profile, onboardingPredictive);
 
   // ── BUG 1 FIX (bug-spec §2) ──────────────────────────────────────
-  // This previously read `profile.period_length_avg` — the ONBOARDING
-  // estimate, stored once as a range midpoint ("3-5 days" → 4) and never
-  // updated again. So a user whose real period runs 6 days kept getting a
-  // 4-day predicted bleed forever, and the 6th day was never shown.
-  //
-  // The measured average from the user's own logged periods now takes
-  // priority, exactly as §6 requires (logged data > history > onboarding).
-  // The onboarding value survives only as a fallback for users who have not
-  // yet completed a period with an end date.
-  const measuredBleedLength = avgBleedLength(allLogs || []);
-  const periodLengthAvg = measuredBleedLength ?? profile?.period_length_avg ?? null;
+  // The measured average from the user's own logged periods takes priority over
+  // the onboarding estimate (§6: logged data > history > onboarding), gated the
+  // same way so app and backend never disagree.
+  const periodLengthAvg = computeEffectivePeriodLength(allLogs || [], profile);
 
   // PRD Rule 1: never assume 28 days. With no measured average and no usable
   // onboarding baseline, do NOT generate a prediction.
@@ -1228,11 +1227,15 @@ router.get('/summary', async (req, res, next) => {
           motivationStyle:  profile?.motivation_style,
           healthFocus:      profile?.health_focus,
           hormonalStatus:   profile?.hormonal_status,
-          // NOTE: these two are nullable per PRD; we no longer fabricate 28/5
-          // when the user hasn't told us. Old clients should stop relying on
-          // these defaults and read from `engine` instead.
-          cycleLengthAvg:   profile?.cycle_length_avg ?? null,
-          periodLengthAvg:  profile?.period_length_avg ?? null,
+          // These drive the APP's calendar extrapolation. They MUST match the
+          // value the backend used for the stored prediction, or the app tiles
+          // periods on different days than the backend predicts → scattered
+          // calendar. So we send the ENGINE's effective values (measured once
+          // 2+ cycles exist, else the onboarding estimate), NOT the raw
+          // onboarding columns. Both are gated identically (see
+          // computeEffectiveCycleLength) so app and backend never disagree.
+          cycleLengthAvg:   ctx.stats.avgCycleLength ?? profile?.cycle_length_avg ?? null,
+          periodLengthAvg:  ctx.stats.avgBleedLength ?? profile?.period_length_avg ?? null,
         },
 
         // ── New PRD engine fields (additive for new clients) ─────

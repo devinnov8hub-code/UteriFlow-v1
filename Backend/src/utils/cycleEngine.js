@@ -91,6 +91,46 @@ export function onboardingIsPredictive({ periodRegularity, cycleLengthRange } = 
 }
 
 
+// ─── Effective averages (single source of truth for app AND backend) ───────
+// The mobile app extrapolates the calendar forward/backward using the cycle &
+// period length in the /summary payload, while the backend computes the stored
+// prediction from its own value. If those two numbers differ, the app tiles
+// periods on different days than the backend predicts → the calendar scatters.
+//
+// These helpers guarantee ONE effective value, used everywhere:
+//
+//   • Measured data (from the user's real logged cycles) overrides the
+//     onboarding estimate ONLY once there are at least 2 measured cycles
+//     (i.e. 3+ logged periods). A single gap — e.g. from back-filling one
+//     previous period — can silently span a skipped month and yield a wild
+//     length (37, 56 days…), so we keep the onboarding estimate until real
+//     evidence accumulates. This is what stops "back-fill a previous month →
+//     everything scatters".
+//
+//   • For non-predictive onboarding profiles (very long / unpredictable) with
+//     no measured data yet, the cycle length stays null → no fabricated
+//     prediction, exactly as before.
+export const MIN_CYCLES_TO_TRUST_MEASURED = 2;
+
+export function computeEffectiveCycleLength(stats, profile, onboardingPredictive) {
+  const measuredOk =
+    stats && stats.cyclesUsed >= MIN_CYCLES_TO_TRUST_MEASURED && stats.avgCycleLength != null;
+  if (measuredOk) return stats.avgCycleLength;
+  return onboardingPredictive ? (profile?.cycle_length_avg ?? null) : null;
+}
+
+export function computeEffectivePeriodLength(periodLogs, profile) {
+  // Measured bleed length once 2+ completed periods (with an end_date) exist;
+  // otherwise the onboarding estimate. Never below 1.
+  const completed = (periodLogs || []).filter((l) => l?.start_date && l?.end_date);
+  if (completed.length >= 2) {
+    const measured = avgBleedLength(completed);
+    if (measured != null) return measured;
+  }
+  return profile?.period_length_avg ?? null;
+}
+
+
 // ─── Cycle statistics from period_logs[] ───────────────────────────
 // Expects logs sorted ASC by start_date. Returns null fields when there
 // isn't enough data (rather than fabricating a 28-day cycle).
