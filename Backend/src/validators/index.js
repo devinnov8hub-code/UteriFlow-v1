@@ -66,6 +66,17 @@ export const onboardingValidators = {
   cycleInfo: [
     body('lastPeriodDate').isISO8601().toDate().withMessage('lastPeriodDate must be a valid date'),
 
+    // Explicit numeric lengths (accurate path). Optional; validated to sane
+    // bounds. When present they take priority over the range buckets.
+    body('cycleLength')
+      .optional({ nullable: true })
+      .isInt({ min: 15, max: 90 })
+      .withMessage('cycleLength must be between 15 and 90 days'),
+    body('periodLength')
+      .optional({ nullable: true })
+      .isInt({ min: 1, max: 14 })
+      .withMessage('periodLength must be between 1 and 14 days'),
+
     body('periodLengthRange')
       .optional()
       .isIn(['1_2', '3_5', '6_8', '9_plus'])

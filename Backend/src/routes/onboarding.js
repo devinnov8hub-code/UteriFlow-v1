@@ -10,6 +10,7 @@ import { sendOnboardingCompleteEmail } from '../utils/email.js';
 import {
   mapHormonalToPcos, mapPcosToHormonal,
   PERIOD_LENGTH_MIDPOINT, CYCLE_LENGTH_MIDPOINT,
+  cycleRangeFromDays, periodRangeFromDays,
 } from '../utils/cycleEngine.js';
 
 const router = express.Router();
@@ -102,6 +103,16 @@ router.post('/pcos-status', onboardingValidators.pcosStatus, validate, async (re
 router.post('/cycle-info', onboardingValidators.cycleInfo, validate, async (req, res, next) => {
   try {
     const { lastPeriodDate, periodLengthRange, cycleLengthRange } = req.body;
+    // Explicit numeric cycle/period length (the accurate path). When present,
+    // these are the user's REAL numbers and take priority over the wide range
+    // buckets. Clamped to sane bounds so a typo can't poison predictions.
+    const clampInt = (v, lo, hi) => {
+      const n = Math.round(Number(v));
+      if (!Number.isFinite(n) || n < lo || n > hi) return null;
+      return n;
+    };
+    const cycleLength  = clampInt(req.body.cycleLength, 15, 90);
+    const periodLength = clampInt(req.body.periodLength, 1, 14);
     const userId = req.user.id;
 
     const lastPeriodIso = new Date(lastPeriodDate).toISOString().split('T')[0];
@@ -109,18 +120,31 @@ router.post('/cycle-info', onboardingValidators.cycleInfo, validate, async (req,
     const profileUpdates = {
       last_period_start: lastPeriodIso,
     };
-    if (periodLengthRange) {
+
+    // ── Period length ──────────────────────────────────────────────────────
+    if (periodLength != null) {
+      // Store the real number; derive the bucket only for classification.
+      profileUpdates.period_length_avg   = periodLength;
+      profileUpdates.period_length_range = periodRangeFromDays(periodLength);
+    } else if (periodLengthRange) {
       profileUpdates.period_length_range = periodLengthRange;
       profileUpdates.period_length_avg   = PERIOD_LENGTH_MIDPOINT[periodLengthRange];
     }
-    if (cycleLengthRange) {
+
+    // ── Cycle length ───────────────────────────────────────────────────────
+    if (cycleLength != null) {
+      // The user's exact cycle length drives predictions directly. This is the
+      // fix for short-cycle (<21) users whose real length never matched the
+      // 18-day range midpoint.
+      profileUpdates.cycle_length_avg   = cycleLength;
+      profileUpdates.cycle_length_range = cycleRangeFromDays(cycleLength);
+    } else if (cycleLengthRange) {
       profileUpdates.cycle_length_range = cycleLengthRange;
       profileUpdates.cycle_length_avg   = CYCLE_LENGTH_MIDPOINT[cycleLengthRange];
     }
-    // Note: when the user does NOT provide a range, we deliberately do NOT
-    // touch cycle_length_avg/period_length_avg. After v5 migration the column
-    // default is dropped, so for new users the field stays NULL — which the
-    // engine reads as "we don't know yet, use low confidence".
+    // Note: when the user provides neither a number nor a range, we deliberately
+    // do NOT touch cycle_length_avg/period_length_avg (stays NULL → low
+    // confidence until real cycles are logged).
 
     await updateProfile(req.supabase, userId, profileUpdates);
 
@@ -143,10 +167,10 @@ router.post('/cycle-info', onboardingValidators.cycleInfo, validate, async (req,
     return success(res, {
       message: 'Cycle information saved successfully',
       lastPeriodDate:    lastPeriodIso,
-      periodLengthRange: periodLengthRange ?? null,
-      cycleLengthRange:  cycleLengthRange  ?? null,
-      periodLengthAvg:   periodLengthRange ? PERIOD_LENGTH_MIDPOINT[periodLengthRange] : null,
-      cycleLengthAvg:    cycleLengthRange  ? CYCLE_LENGTH_MIDPOINT[cycleLengthRange]   : null,
+      periodLengthRange: profileUpdates.period_length_range ?? null,
+      cycleLengthRange:  profileUpdates.cycle_length_range  ?? null,
+      periodLengthAvg:   profileUpdates.period_length_avg   ?? null,
+      cycleLengthAvg:    profileUpdates.cycle_length_avg    ?? null,
     });
   } catch (error) { next(error); }
 });

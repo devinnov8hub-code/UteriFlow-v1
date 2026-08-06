@@ -50,6 +50,34 @@ export function mapPcosToHormonal(pcosStatus) {
 export const PERIOD_LENGTH_MIDPOINT = { '1_2': 2, '3_5': 4, '6_8': 7, '9_plus': 9 };
 export const CYCLE_LENGTH_MIDPOINT  = { 'lt_21': 18, '21_35': 28, '36_60': 45, 'gt_60': 65 };
 
+// ─── Explicit day-count → classification range ─────────────────────────────
+// The onboarding range buckets are wide, so their midpoints ("less than 21" →
+// 18) are poor predictions for anyone whose real cycle sits at the edge of a
+// bucket — this is exactly why short-cycle (<21) users got inaccurate
+// predictions. When the user tells us their ACTUAL cycle/period length as a
+// number, we store that number verbatim in cycle_length_avg / period_length_avg
+// (the engine already predicts from those columns) and derive the range string
+// ONLY for classification (predictability, PCOS routing). The user's real
+// number drives the maths; the derived bucket just preserves the existing
+// predictability rules.
+export function cycleRangeFromDays(days) {
+  const n = Number(days);
+  if (!Number.isFinite(n)) return null;
+  if (n < 21) return 'lt_21';
+  if (n <= 35) return '21_35';
+  if (n <= 60) return '36_60';
+  return 'gt_60';
+}
+
+export function periodRangeFromDays(days) {
+  const n = Number(days);
+  if (!Number.isFinite(n)) return null;
+  if (n <= 2) return '1_2';
+  if (n <= 5) return '3_5';
+  if (n <= 8) return '6_8';
+  return '9_plus';
+}
+
 
 // ─── Contraceptive ─────────────────────────────────────────────────
 const HORMONAL_CONTRACEPTIVES = new Set([
