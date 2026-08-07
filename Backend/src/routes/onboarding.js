@@ -6,6 +6,7 @@ import { onboardingValidators } from '../validators/index.js';
 import { body } from 'express-validator';
 import { NotFoundError } from '../errors/index.js';
 import { success } from '../utils/response.js';
+import { refreshPredictions } from './period.js';
 import { sendOnboardingCompleteEmail } from '../utils/email.js';
 import {
   mapHormonalToPcos, mapPcosToHormonal,
@@ -163,6 +164,13 @@ router.post('/cycle-info', onboardingValidators.cycleInfo, validate, async (req,
         is_first_log: true,
       });
     }
+
+    // Generate the initial prediction now, from the cycle length just stored.
+    // Previously nothing computed a prediction at onboarding, so a user who
+    // entered her cycle length and simply opened the calendar (without logging
+    // anything) saw no / an incorrect prediction. This makes the very first
+    // calendar correct.
+    await refreshPredictions(req.supabase, userId).catch(() => {});
 
     return success(res, {
       message: 'Cycle information saved successfully',

@@ -9,7 +9,8 @@ import { body } from 'express-validator';
 import { NotFoundError, AppError, ValidationError } from '../errors/index.js';
 import { success } from '../utils/response.js';
 import { createClient } from '@supabase/supabase-js';
-import { mapPcosToHormonal } from '../utils/cycleEngine.js';
+import { mapPcosToHormonal, cycleRangeFromDays, periodRangeFromDays } from '../utils/cycleEngine.js';
+import { refreshPredictions } from './period.js';
 
 const router = express.Router();
 router.use(authenticateUser);
@@ -84,6 +85,21 @@ router.patch('/', profileValidators.update, validate, async (req, res, next) => 
       if (req.body[jsKey] !== undefined) updates[dbKey] = req.body[jsKey];
     }
 
+    // When the user edits their cycle/period length here, keep the derived
+    // classification RANGE in sync with the new number. Otherwise a stale range
+    // (e.g. a non-predictive '36_60' from onboarding) could suppress a perfectly
+    // valid new value, or misclassify predictability.
+    const cycleLenChanged  = updates.cycle_length_avg  !== undefined;
+    const periodLenChanged = updates.period_length_avg !== undefined;
+    if (cycleLenChanged) {
+      const r = cycleRangeFromDays(updates.cycle_length_avg);
+      if (r) updates.cycle_length_range = r;
+    }
+    if (periodLenChanged) {
+      const r = periodRangeFromDays(updates.period_length_avg);
+      if (r) updates.period_length_range = r;
+    }
+
     // PRD-canonical "Settings" fields (validated in profileValidators.update but
     // previously dropped because they weren't in the `allowed` map above).
     //
@@ -117,6 +133,15 @@ router.patch('/', profileValidators.update, validate, async (req, res, next) => 
       .select()
       .maybeSingle();
     if (error) throw error;
+
+    // If the cycle or period length changed, regenerate the stored prediction
+    // from the new values. Without this the prediction went stale: the app would
+    // read the new length from /summary but anchor to the old predicted dates,
+    // scattering the calendar (this was the "editing bleed length scatters
+    // everything" report).
+    if (cycleLenChanged || periodLenChanged) {
+      await refreshPredictions(req.supabase, req.user.id).catch(() => {});
+    }
 
     return success(res, { message: 'Profile updated successfully', profile: data });
   } catch (error) { next(error); }

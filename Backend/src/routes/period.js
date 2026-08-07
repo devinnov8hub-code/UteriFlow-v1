@@ -1652,3 +1652,10 @@ router.get('/daily-insight', async (req, res, next) => {
 
 
 export default router;
+
+// Exported so onboarding (after storing cycle-info) and profile edits (after
+// changing cycle/period length) can regenerate the stored prediction. Without
+// this, the stored prediction went stale relative to the current cycle/period
+// length — the app would tile with the new length but anchor to the old
+// prediction, scattering the calendar.
+export { refreshPredictions };
