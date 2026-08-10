@@ -228,14 +228,32 @@ async function syncCachedClassification(db, userId, ctx) {
 // PRD Rule 1: never assume a 28-day cycle. Required args, no defaults.
 // Callers (refreshPredictions) must supply real values from logs or onboarding.
 // Throws if cycleLengthAvg is missing — the bug here is upstream, fail loud.
-function computePredictions(lastStart, cycleLengthAvg, periodLengthAvg) {
+function computePredictions(lastStart, cycleLengthAvg, periodLengthAvg, asOf = null) {
   if (!lastStart || !cycleLengthAvg) {
     throw new Error('computePredictions requires lastStart and cycleLengthAvg');
   }
   const safePeriodLength = periodLengthAvg ?? 5; // affects predicted_end only, not ovulation math
   const start = new Date(lastStart);
+
+  // The next period is the first cycle boundary after the last logged period.
+  // BUT if the user's last period was entered as a date more than one cycle ago
+  // (very common at onboarding — she types a last-period date from weeks back),
+  // a single +1-cycle prediction lands in the PAST and the app shows a wrong /
+  // "overdue" next period. Advance by whole cycles until the predicted start is
+  // today or later, so the "next period" is genuinely the upcoming one. Ovulation
+  // and fertile window then fall on the correct upcoming cycle too.
   const predictedStart = new Date(start);
   predictedStart.setDate(start.getDate() + cycleLengthAvg);
+
+  const todayUTC = asOf
+    ? new Date(new Date(asOf).toISOString().split('T')[0])
+    : new Date(new Date().toISOString().split('T')[0]);
+  // Guard the loop (cycleLengthAvg >= 15 always, so this terminates quickly).
+  let safety = 0;
+  while (predictedStart < todayUTC && safety < 1000) {
+    predictedStart.setDate(predictedStart.getDate() + cycleLengthAvg);
+    safety += 1;
+  }
 
   const predictedEnd = new Date(predictedStart);
   predictedEnd.setDate(predictedStart.getDate() + safePeriodLength - 1);
@@ -1159,12 +1177,16 @@ router.get('/summary', async (req, res, next) => {
         .maybeSingle();
       prediction = pred ?? null;
 
-      // Self-heal: if a predictable (non-PCOS, non-hormonal) user has NO current
-      // prediction — e.g. it was wrongly cleared when she was briefly mis-flagged
-      // as PCOS by a data gap — regenerate it now so she recovers on her next
-      // app open without having to re-log. No-op for users who genuinely
-      // shouldn't be predicted (returns null and writes nothing new).
-      if (!prediction && ctx.userType !== 'PCOS') {
+      // Self-heal: regenerate the current prediction when it is missing (e.g.
+      // wrongly cleared by a brief PCOS mis-flag) OR when it has gone stale —
+      // its predicted start is already in the past, so without refreshing it the
+      // app would show an overdue "next period". refreshPredictions rolls the
+      // date forward to the upcoming cycle. No-op for users who shouldn't be
+      // predicted.
+      const predIsPastDue =
+        prediction?.predicted_start &&
+        new Date(prediction.predicted_start) < new Date(new Date().toISOString().split('T')[0]);
+      if ((!prediction || predIsPastDue) && ctx.userType !== 'PCOS') {
         const regenerated = await refreshPredictions(req.supabase, userId).catch(() => null);
         if (regenerated) {
           const { data: pred2 } = await req.supabase
