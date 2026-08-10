@@ -629,7 +629,7 @@ export function confidenceLevel({ userType, cyclesLogged, pcosStatus }) {
 // ─── Cycle day from last period start ──────────────────────────────
 // Returns the 1-indexed cycle day (Day 1 = first day of bleeding).
 // Returns null when no period has been logged yet.
-export function calculateCycleDay(lastPeriodStart, today = new Date()) {
+export function calculateCycleDay(lastPeriodStart, today = new Date(), cycleLength = null) {
   if (!lastPeriodStart) return null;
   const start = new Date(lastPeriodStart);
   const t = new Date(today);
@@ -637,6 +637,14 @@ export function calculateCycleDay(lastPeriodStart, today = new Date()) {
   t.setHours(0, 0, 0, 0);
   const days = Math.floor((t - start) / 86400000);
   if (days < 0) return null;
+  // If the last LOGGED period is more than one cycle ago (common when a user
+  // onboards with an older last-period date and hasn't logged since), wrap the
+  // count into the CURRENT cycle so the day reflects where she actually is —
+  // e.g. 34 days elapsed on a 27-day cycle is day 7 of the current cycle, not an
+  // impossible "day 34" that throws off the phase and the current-month view.
+  if (cycleLength && cycleLength > 0) {
+    return (days % cycleLength) + 1;
+  }
   return days + 1; // Day 1 = first day of bleeding
 }
 

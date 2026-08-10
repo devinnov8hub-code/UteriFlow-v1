@@ -99,7 +99,7 @@ async function loadUserContext(db, userId, today = new Date()) {
     cycleRegularity: profile.period_regularity,
   });
 
-  const cycleDay = calculateCycleDay(lastPeriodStart, today);
+  const cycleDay = calculateCycleDay(lastPeriodStart, today, effectiveCycleLength);
 
   const onContraceptive = isHormonalContraceptive(profile.contraceptive_type);
   const flags = evaluatePcosFlags({
