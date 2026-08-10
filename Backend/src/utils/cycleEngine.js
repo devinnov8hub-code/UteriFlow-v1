@@ -148,14 +148,21 @@ export function computeEffectiveCycleLength(stats, profile, onboardingPredictive
 }
 
 export function computeEffectivePeriodLength(periodLogs, profile) {
-  // Measured bleed length once 2+ completed periods (with an end_date) exist;
-  // otherwise the onboarding estimate. Never below 1.
+  // The user's STATED period length — whether from onboarding or a later profile
+  // edit — is authoritative. When she explicitly sets her bleed length we must
+  // honour it, not silently replace it with a measured average. Previously the
+  // measured value overrode her edit once she had 2+ completed periods, so
+  // increasing/decreasing her bleed length in the profile appeared to "do
+  // nothing" on the calendar. We fall back to the measured average only when she
+  // has never given us a value.
+  if (profile?.period_length_avg != null) return profile.period_length_avg;
+
   const completed = (periodLogs || []).filter((l) => l?.start_date && l?.end_date);
   if (completed.length >= 2) {
     const measured = avgBleedLength(completed);
     if (measured != null) return measured;
   }
-  return profile?.period_length_avg ?? null;
+  return null;
 }
 
 
@@ -368,9 +375,25 @@ export function resolveAverages(periodLogs = [], profile = {}) {
 //   daysSinceLastPeriod: integer, how long since the most recent logged period
 //   cycleRegularity: onboarding answer ('regular'|'varies_week'|'unpredictable'|'not_tracked')
 export function classifyUserType({ stats, pcosStatus, daysSinceLastPeriod, cycleRegularity }) {
-  // PRD: confirmed PCOS or 60+ days no period → PCOS track
+  // A clinician-confirmed diagnosis always wins.
   if (pcosStatus === 'confirmed') return 'PCOS';
-  if (typeof daysSinceLastPeriod === 'number' && daysSinceLastPeriod > 60) return 'PCOS';
+
+  // 60+ days since the last period can signal anovulation (PCOS track) — BUT
+  // only when we don't already have evidence of a regular cycle. An established
+  // regular user showing a long gap is far more likely to have a DATA gap
+  // (missed logging, a back-filled or edited previous month, or a stale date
+  // sent by the client) than to have suddenly developed PCOS. Flipping her would
+  // wrongly wipe her predictions and clinical history, so we require that she is
+  // NOT already regular before using this soft signal.
+  const looksRegular =
+    stats.cyclesUsed >= 2 && stats.stdDev !== null && stats.stdDev <= 7;
+  if (
+    typeof daysSinceLastPeriod === 'number' &&
+    daysSinceLastPeriod > 60 &&
+    !looksRegular
+  ) {
+    return 'PCOS';
+  }
 
   // If user told us at onboarding they're irregular, respect that until we
   // have enough cycles to override.

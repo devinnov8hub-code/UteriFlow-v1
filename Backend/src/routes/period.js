@@ -1158,6 +1158,26 @@ router.get('/summary', async (req, res, next) => {
         .limit(1)
         .maybeSingle();
       prediction = pred ?? null;
+
+      // Self-heal: if a predictable (non-PCOS, non-hormonal) user has NO current
+      // prediction — e.g. it was wrongly cleared when she was briefly mis-flagged
+      // as PCOS by a data gap — regenerate it now so she recovers on her next
+      // app open without having to re-log. No-op for users who genuinely
+      // shouldn't be predicted (returns null and writes nothing new).
+      if (!prediction && ctx.userType !== 'PCOS') {
+        const regenerated = await refreshPredictions(req.supabase, userId).catch(() => null);
+        if (regenerated) {
+          const { data: pred2 } = await req.supabase
+            .from('cycle_predictions')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('is_current', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          prediction = pred2 ?? null;
+        }
+      }
     }
 
     const { data: lastLog } = await req.supabase
