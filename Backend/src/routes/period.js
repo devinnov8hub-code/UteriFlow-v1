@@ -47,7 +47,9 @@ async function loadUserContext(db, userId, today = new Date()) {
   const periodLogs  = logsRes.data    || [];
   const symptomLogs = symptomsRes.data || [];
 
-  const stats = cycleStats(periodLogs);
+  // Pass her own stated cycle length as the reference so an occasional extra
+  // bleed (two periods in one month) is not averaged in as a cycle change.
+  const stats = cycleStats(periodLogs, profile?.cycle_length_avg ?? null);
   // Effective (gated) bleed length — measured only once 2+ completed periods
   // exist, else the onboarding estimate. Shared helper so app & backend agree.
   const bleed = computeEffectivePeriodLength(periodLogs, profile);
@@ -311,7 +313,7 @@ async function refreshPredictions(db, userId) {
     .eq('user_id', userId)
     .order('start_date', { ascending: true });
 
-  const measuredStats = cycleStats(allLogs || []);
+  const measuredStats = cycleStats(allLogs || [], profile?.cycle_length_avg ?? null);
 
   // Determine the user track. PCOS users (confirmed, or 60+ days since last
   // period) get NO calendar prediction — the engine routes them to symptom

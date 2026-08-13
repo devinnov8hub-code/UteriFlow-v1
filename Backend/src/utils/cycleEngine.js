@@ -180,9 +180,10 @@ export function computeEffectivePeriodLength(periodLogs, profile) {
 export const CYCLE_MIN_DAYS = 14;
 export const CYCLE_MAX_DAYS = 120;
 
-export function cycleStats(periodLogs = []) {
+export function cycleStats(periodLogs = [], referenceCycleLength = null) {
   const cycleLengths = [];
   let outliersIgnored = 0;
+  let anomaliesIgnored = 0;
 
   // Collapse duplicate rows before measuring. The old blind-insert behaviour
   // left many users with several rows sharing (or nearly sharing) a start date.
@@ -215,8 +216,26 @@ export function cycleStats(periodLogs = []) {
     const prev = new Date(periodLogs[i - 1].start_date);
     const curr = new Date(periodLogs[i].start_date);
     const len = Math.round((curr - prev) / 86400000);
-    if (len >= CYCLE_MIN_DAYS && len <= CYCLE_MAX_DAYS) cycleLengths.push(len);
-    else if (Number.isFinite(len) && len > 0)           outliersIgnored += 1;
+    if (len >= CYCLE_MIN_DAYS && len <= CYCLE_MAX_DAYS) {
+      // Anomaly guard for "two periods in one month".
+      //
+      // An occasional extra bleed produces a very short gap (e.g. 16 days for a
+      // woman whose cycle is 27). That is an anomaly, NOT a change in her cycle
+      // length — but averaged in naively it dragged her 27 down to 22 and moved
+      // every future prediction. When we know her own typical cycle we exclude
+      // gaps that sit far outside it (below 60% or above 160%), so one unusual
+      // month can't rewrite her cycle. The log itself is still kept and shown;
+      // only the AVERAGE ignores it. Genuine drift (27 -> 31, say) is well
+      // inside the band and is still learned normally.
+      const isAnomalous =
+        referenceCycleLength != null &&
+        referenceCycleLength > 0 &&
+        (len < referenceCycleLength * 0.6 || len > referenceCycleLength * 1.6);
+      if (isAnomalous) anomaliesIgnored += 1;
+      else cycleLengths.push(len);
+    } else if (Number.isFinite(len) && len > 0) {
+      outliersIgnored += 1;
+    }
   }
 
   if (cycleLengths.length === 0) {
@@ -228,6 +247,7 @@ export function cycleStats(periodLogs = []) {
       maxCycle:       null,
       cyclesUsed:     0,
       outliersIgnored,
+      anomaliesIgnored,
     };
   }
 
@@ -248,6 +268,7 @@ export function cycleStats(periodLogs = []) {
     maxCycle:       Math.max(...recent),
     cyclesUsed:     recent.length,
     outliersIgnored,
+    anomaliesIgnored,
   };
 }
 
